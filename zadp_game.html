@@ -1,0 +1,2038 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZADP Dump Planner</title>
+<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #182029; --panel2: #1f2a35; --line: #2c3a48;
+    --text: #e6edf3; --muted: #8b9bab; --accent: #f5a623; --accent2: #3fb68b;
+    --danger: #e5534b; --safe: #3fb68b; --area: #c9a46b; --front: #6cb6ff;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  header h1 span { color: var(--accent); }
+  .units { color: var(--muted); font-size: 12px; }
+  .rounds { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .rounds button { border-radius: 999px; font-size: 12px; padding: 4px 12px; }
+  .rounds button.done { border-color: var(--accent2); color: var(--accent2); }
+  main { flex: 1; display: flex; min-height: 0; }
+  aside { width: 360px; flex-shrink: 0; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line); padding: 14px; }
+  section.card { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  section.card h2 { font-size: 12.5px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .8px; color: var(--accent); }
+  section.card h3 { font-size: 12px; margin: 12px 0 4px; color: var(--text); text-transform: uppercase; letter-spacing: .6px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .tabs button { flex: 1; }
+  button { background: #2a3744; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; cursor: pointer; font: inherit; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.on { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+  button.primary { background: var(--accent2); color: #04140d; border-color: var(--accent2); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 5px 0; }
+  .row label { flex: 1; color: var(--muted); }
+  .row .u { width: 34px; color: var(--muted); font-size: 12px; }
+  input[type=number], input[type=text], select { width: 110px; background: #0f1419; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: inherit; }
+  input[type=text] { width: 100%; }
+  select.wide { width: 100%; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .formula { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #0f1419; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; color: #cfe3f5; white-space: pre-wrap; }
+  .stats { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
+  .stats div:nth-child(odd) { color: var(--muted); }
+  .ok { color: var(--accent2); } .bad { color: var(--danger); } .warn { color: var(--accent); }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 18px 10px; text-align: center; color: var(--muted); cursor: pointer; }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
+  .drop b { color: var(--text); }
+  .progress { height: 6px; background: #0f1419; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .dims { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0; }
+  .dims td { padding: 4px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  .dims td.n { font-weight: 600; width: 64px; }
+  .dims input { width: 82px; }
+  .dims tr.sel td { background: #2a3744; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: #0f1419; border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .chip select { width: auto; padding: 2px 4px; font-size: 12px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
+  #stage { flex: 1; position: relative; min-width: 0; }
+  #cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  #viewTabs { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; }
+  #banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(24,32,41,.94); max-width: 70%;
+            border: 1px solid var(--accent); padding: 6px 14px; border-radius: 999px; font-size: 13px; pointer-events: none; text-align: center; }
+  .legend { position: absolute; bottom: 10px; left: 12px; background: rgba(24,32,41,.88); border: 1px solid var(--line);
+            border-radius: 8px; padding: 6px 10px; font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+  #fleetView { position: absolute; inset: 0; overflow-y: auto; padding: 16px; display: none; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .tcard { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; cursor: pointer; }
+  .tcard.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .tcard h4 { margin: 0 0 2px; font-size: 14px; }
+  .tcard .sub { color: var(--muted); font-size: 12px; }
+  .tcard canvas { width: 100%; height: auto; aspect-ratio: 500 / 260; display: block; margin: 6px 0; background: #0f1419; border-radius: 6px; }
+  table.fleet { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  table.fleet th, table.fleet td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: right; }
+  table.fleet th:first-child, table.fleet td:first-child { text-align: left; }
+  table.fleet th { color: var(--muted); font-weight: 500; }
+  tr.gov td { color: var(--accent); }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  .lib { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
+  .lib div { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+  .lib div span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lib button { padding: 3px 8px; font-size: 12px; }
+  @media (max-width: 760px) { main { flex-direction: column; } aside { width: auto; max-height: 50vh; } #stage { min-height: 55vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>ZADP</span> Dump Planner</h1>
+  <span class="units">Units everywhere: metres · tonnes · m³ · degrees · seconds</span>
+  <nav class="rounds">
+    <button data-round="1" class="on">Round 1 · Dump area</button>
+    <button data-round="2">Round 2 · Fleet</button>
+    <button data-round="3">Round 3 · Safe boundary</button>
+    <button data-round="4">Round 4 · Zones &amp; piles</button>
+    <button data-round="5">Round 5 · Dispatch</button>
+  </nav>
+</header>
+<main>
+  <aside>
+    <!-- ======================= ROUND 1 ======================= -->
+    <div id="aside1">
+      <section class="card">
+        <h2>1 · Upload the sketch</h2>
+        <label class="drop" id="drop"><input type="file" id="fileIn" accept="image/*" hidden>
+          <b>Click or drop an image</b><br>Sketch or drawing of the dump area with its dimensions written on it</label>
+        <div class="progress"><i id="prog"></i></div>
+        <p class="hint" id="progMsg"></p>
+        <div id="pickBox" hidden>
+          <p class="hint">Lines in the drawing split it into several closed regions. Click each region that is part of the dump area (orange), then confirm.</p>
+          <div class="row"><button class="primary" id="useSel" style="flex:1">✓ Use selected regions</button></div>
+        </div>
+      </section>
+
+      <section class="card" id="dimCard" hidden>
+        <h2>2 · Dimensions</h2>
+        <p class="hint" id="dimIntro"></p>
+        <table class="dims" id="dimTable"></table>
+        <div id="extraBox"></div>
+        <div class="row" style="margin-top:8px"><button class="primary" id="buildBtn" style="flex:1">Build shape from dimensions</button></div>
+        <p class="hint" id="buildMsg"></p>
+        <details><summary>Corners detected wrong?</summary>
+          <div class="row"><label>Corner detail</label><input type="range" id="detail" min="0.4" max="5" step="0.1" value="1.2"><span id="detailVal" class="u"></span></div>
+          <p class="hint">Fewer or more corners. Re-reads the dimensions afterwards.</p>
+        </details>
+      </section>
+
+      <section class="card" id="saveCard" hidden>
+        <h2>3 · Entry &amp; save</h2>
+        <div class="row"><button id="entryBtn" style="flex:1">📍 Set entry point</button></div>
+        <p class="hint">Click the button, then click the boundary where trucks enter.</p>
+        <div class="row"><input type="text" id="areaName" placeholder="Area name, e.g. North paddock"></div>
+        <div class="row"><button class="primary" id="saveArea" style="flex:1">💾 Save area &amp; go to Round 2</button></div>
+        <div class="stats" id="stats1"></div>
+      </section>
+
+      <section class="card">
+        <h2>Saved areas</h2>
+        <div class="lib" id="lib"></div>
+      </section>
+    </div>
+
+    <!-- ======================= ROUND 2 ======================= -->
+    <div id="aside2" hidden>
+      <section class="card">
+        <h2>Fleet</h2>
+        <p class="hint">Add each truck type that works in this dump area. Each one needs 4 inputs: payload, number of trucks, pile radius and size.</p>
+        <div class="row"><button id="addTruck" style="flex:1">+ Add truck type</button></div>
+        <div class="stats" id="stats2"></div>
+        <div class="row"><label>Lane width (each of 2 lanes)</label><input type="number" id="laneW" step="0.1" min="0" placeholder="auto"><span class="u">m</span></div>
+        <p class="hint">Site setting: one lane in, one lane out, from the entry to the back. Empty = widest truck + 1 m.</p>
+      </section>
+      <div id="truckForm"></div>
+      <div class="row"><button class="primary" id="toR3" style="flex:1">Go to Round 3 →</button></div>
+    </div>
+
+    <!-- ======================= ROUND 3 ======================= -->
+    <div id="aside3" hidden>
+      <section class="card">
+        <h2>3 · Safe boundary (Minkowski erosion)</h2>
+        <p class="hint">Each edge moves inward by a margin, as in Step 1 of the method. The truck's GPS centre stays inside the green zone, so the whole truck body stays inside the dump area. The <b>largest margins in the fleet</b> are used, so every truck is safe.</p>
+        <div class="stats" id="stats3"></div>
+        <div class="row"><button id="entryBtn3" style="flex:1">📍 Move entry point</button></div>
+        <div class="row"><button class="primary" id="toR4" style="flex:1">Go to Round 4 →</button></div>
+      </section>
+    </div>
+
+    <!-- ======================= ROUND 4 ======================= -->
+    <div id="aside4" hidden>
+      <section class="card">
+        <h2>Step 2 · Zones (Boustrophedon)</h2>
+        <p class="hint">A sweep line crosses the safe zone; at every corner where the shape's width changes it cuts a new zone. Each zone is a simple strip without notches.</p>
+        <div class="row"><label>Sweep angle</label><input type="range" id="sweep" min="0" max="179" step="1" value="0"><span id="sweepVal" class="u" style="width:40px"></span></div>
+        <div class="row"><button id="bestAngle" style="flex:1">★ Best angle (fewest zones)</button></div>
+        <div class="stats" id="stats4z"></div>
+      </section>
+      <section class="card">
+        <h2>Step 3 · Hexagonal pile grid</h2>
+        <p class="hint">One grid per truck type. Rows are (2r + spacing)·√3/2 apart and every other row is shifted half a step. Pile centre must be inside a zone; the pile circle must be inside the dump area and must not cover the lane. Spacing 0 = touching; negative = overlap.</p>
+        <table class="dims" id="gridTable"></table>
+        <div class="row"><label><input type="checkbox" id="showNums" checked> Show fill order numbers</label></div>
+      </section>
+      <section class="card">
+        <h2>Lane (2 one-way lanes)</h2>
+        <div class="stats" id="stats4l"></div>
+        <p class="hint">The lane runs from the entry to the back. It is filled <b>last, deepest part first</b> — like water rising: a part of the lane gets piles only after every spot deeper than it is full.</p>
+      </section>
+      <div class="row"><button class="primary" id="toR5" style="flex:1">Go to Round 5 →</button></div>
+    </div>
+
+    <!-- ======================= ROUND 5 ======================= -->
+    <div id="aside5" hidden>
+      <section class="card">
+        <h2>Dispatch method</h2>
+        <div class="tabs" id="methodTabs" style="flex-wrap:wrap"><button data-m="base">Baseline</button><button data-m="grid">Grid + remove</button><button data-m="touch">Touching</button></div>
+        <p class="hint"><b>Baseline</b>: today's practice, fixed spot points with 7.38 m between piles. <b>Grid + remove</b>: the smallest truck's hex grid; a bigger pile cancels the grid spots it covers. <b>Touching</b>: each pile goes as deep as possible, touching piles already there.<br>
+        All three use the same checks: spot free · zone not locked (Rule 2) · truck can drive there and back (one-way lanes, Rule 1) · lane filled last, deepest first.</p>
+      </section>
+      <section class="card">
+        <h2>Run</h2>
+        <div class="row"><button id="playBtn" style="flex:1">▶ Play</button><button id="resetBtn">⟲ Reset</button><button id="endBtn" title="Run to the end instantly">⏭ End</button></div>
+        <div class="tabs" id="speedTabs"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="3">3×</button><button data-s="4">4×</button><button data-s="10">10×</button></div>
+        <p class="hint">1× = 1 minute of site time per second.</p>
+        <div class="stats" id="stats5"></div>
+      </section>
+      <section class="card">
+        <h2>Compare all three</h2>
+        <div class="row"><button class="primary" id="cmpBtn" style="flex:1">Run all 3 on the same trucks</button></div>
+        <div id="cmpBox"></div>
+      </section>
+      <section class="card">
+        <h2>Settings</h2>
+        <div class="row"><label>Speed in dump area</label><input type="number" id="c_kmh" value="20" step="1"><span class="u">km/h</span></div>
+        <div class="row"><label>Manoeuvre / spot time</label><input type="number" id="c_tMan" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label>Dump time</label><input type="number" id="c_tDump" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label>A truck arrives every</label><input type="number" id="c_every" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label>Max trucks inside (Rule 3)</label><input type="number" id="c_maxIn" placeholder="= zones" step="1"><span class="u"></span></div>
+        <div class="row"><label>Random seed (truck order)</label><input type="number" id="c_seed" value="7" step="1"><span class="u"></span></div>
+        <div class="row"><button id="applyCfg" style="flex:1">Apply &amp; reset</button></div>
+      </section>
+    </div>
+  </aside>
+
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="fleetView"></div>
+    <div id="banner">Upload a sketch of the dump area with its dimensions</div>
+    <div id="viewTabs" hidden><button id="vSketch" class="on">Sketch analysis</button><button id="vReal">Real shape (m)</button></div>
+    <div class="legend" id="legend"></div>
+  </div>
+</main>
+
+<script>
+// =====================================================================================
+// State
+// =====================================================================================
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const S = {
+  round: 1,
+  // Round 1
+  img: null, work: null,      // uploaded image and analysis resolution {w,h,sc}
+  cands: null,                // closed regions found in the image
+  raw: null,                  // traced outline (image px, y down)
+  px: null,                   // corner polygon (image px, y down, CCW when y is flipped)
+  curved: false,              // many corners -> measured by overall width/height
+  dims: [],                   // [{kind:'edge'|'width'|'height', i, value, src:'sketch'|'user'|null, det}]
+  dets: [],                   // numbers read from the sketch [{value, x, y, w, h, ang, conf, use}]
+  poly: null,                 // built shape in metres (y up)
+  fit: null,                  // build report
+  entry: null, view1: "sketch", mode: "idle", hl: null,
+  source: "", areaSaved: null,
+  // Round 2
+  fleet: [], sel: null, arrivals: 20, laneW: null,
+  // Round 4
+  sweep: null, gap: {}, view4: null, r4: null,
+  // Round 3
+  safe: [], edgeType: [], gov: null,
+};
+let view = { minx: 0, miny: 0, maxx: 200, maxy: 140, s: 1, ox: 0, oy: 0 };
+
+// =====================================================================================
+// Geometry helpers
+// =====================================================================================
+const area = p => { let a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; a += x1 * y2 - x2 * y1; } return a / 2; };
+const bounds = p => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const [x, y] of p) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; };
+const perim = p => p.reduce((s, a, i) => { const b = p[(i + 1) % p.length]; return s + Math.hypot(b[0] - a[0], b[1] - a[1]); }, 0);
+const edgeLen = (p, i) => { const a = p[i], b = p[(i + 1) % p.length]; return Math.hypot(b[0] - a[0], b[1] - a[1]); };
+const letter = i => i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1);
+const f = (v, d = 2) => (v == null || !isFinite(v)) ? "–" : (+v).toFixed(d);
+function pointInPoly([x, y], p) { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) { const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; }
+
+// Douglas–Peucker simplification: keeps only the real corners of a traced outline
+function dp(pts, tol) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
+  const st = [[0, pts.length - 1]];
+  while (st.length) {
+    const [a, b] = st.pop(); let md = 0, mi = -1;
+    const [ax, ay] = pts[a], [bx, by] = pts[b], dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1e-9;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs(dy * (pts[i][0] - ax) - dx * (pts[i][1] - ay)) / L; if (d > md) { md = d; mi = i; } }
+    if (md > tol) { keep[mi] = 1; st.push([a, mi], [mi, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+function dpClosed(pts, tol) {
+  if (pts.length < 4) return pts.slice();
+  let far = 0, fd = 0;
+  for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
+  return dp(pts.slice(0, far + 1), tol).slice(0, -1).concat(dp(pts.slice(far).concat([pts[0]]), tol).slice(0, -1));
+}
+// merge corners closer than minLen and drop corners that turn by less than 8°
+function mergeCorners(p, minLen) {
+  let q = p.slice(), changed = true;
+  while (changed && q.length > 3) {
+    changed = false;
+    for (let i = 0; i < q.length && q.length > 3; i++) {
+      const a = q[i], b = q[(i + 1) % q.length];
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < minLen) { q[i] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; q.splice((i + 1) % q.length, 1); changed = true; break; }
+    }
+    for (let i = 0; i < q.length && q.length > 3 && !changed; i++) {
+      const a = q[(i - 1 + q.length) % q.length], b = q[i], c = q[(i + 1) % q.length];
+      const t = Math.abs(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]));
+      if (Math.min(t, 2 * Math.PI - t) < 8 * Math.PI / 180) { q.splice(i, 1); changed = true; }
+    }
+  }
+  return q;
+}
+
+// Clipper (integer, mm) helpers
+const K = 1000;
+const toC = p => p.map(([x, y]) => ({ X: Math.round(x * K), Y: Math.round(y * K) }));
+const fromC = p => p.map(q => [q.X / K, q.Y / K]);
+
+// =====================================================================================
+// ROUND 1 · step A — find the shape in the image
+// =====================================================================================
+$("fileIn").onchange = e => { const file = e.target.files[0]; if (file) openFile(file); };
+const drop = $("drop");
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const file = e.dataTransfer.files[0]; if (file) openFile(file); };
+function openFile(file) { const img = new Image(); img.onload = () => analyseImage(img, file.name); img.src = URL.createObjectURL(file); }
+function progress(p, msg) { $("prog").style.width = (p * 100) + "%"; $("progMsg").textContent = msg || ""; }
+
+function analyseImage(img, name) {
+  resetRound1();
+  const MAX = 900, sc = Math.min(1, MAX / Math.max(img.width, img.height));
+  const w = Math.round(img.width * sc), h = Math.round(img.height * sc), N = w * h;
+  const oc = document.createElement("canvas"); oc.width = w; oc.height = h;
+  const g = oc.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
+  const data = g.getImageData(0, 0, w, h).data;
+  // ink mask: Otsu threshold on lightness (black, coloured or grey lines)
+  const gray = new Uint8Array(N), hist = new Array(256).fill(0);
+  for (let i = 0; i < N; i++) { const v = Math.min(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]) * .5 + (data[i * 4] * .299 + data[i * 4 + 1] * .587 + data[i * 4 + 2] * .114) * .5 | 0; gray[i] = v; hist[v]++; }
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, thr = 128;
+  for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = N - wB; if (!wF) break; sB += t * hist[t];
+    const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) ** 2; if (v > best) { best = v; thr = t; } }
+  const ink = new Uint8Array(N); for (let i = 0; i < N; i++) ink[i] = gray[i] <= thr ? 1 : 0;
+  // paper reachable from the border is outside (gaps in dashed lines let it in)
+  const outside = new Uint8Array(N), q = new Int32Array(N); let qh = 0, qt = 0;
+  const seed = i => { if (!ink[i] && !outside[i]) { outside[i] = 1; q[qt++] = i; } };
+  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
+  while (qh < qt) { const i = q[qh++], x = i % w;
+    if (x > 0) seed(i - 1); if (x < w - 1) seed(i + 1); if (i >= w) seed(i - w); if (i < N - w) seed(i + w); }
+  // enclosed paper regions = pieces of the dump area
+  const lab = new Int32Array(N); let nl = 0; const cands = [];
+  for (let s0 = 0; s0 < N; s0++) {
+    if (ink[s0] || outside[s0] || lab[s0]) continue;
+    nl++; qh = qt = 0; q[qt++] = s0; lab[s0] = nl;
+    while (qh < qt) { const i = q[qh++], x = i % w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < N - w ? i + w : -1])
+        if (j >= 0 && !ink[j] && !outside[j] && !lab[j]) { lab[j] = nl; q[qt++] = j; } }
+    if (qt < N * 0.002) continue;
+    const contour = mooreTrace(lab, nl, w, h, s0);
+    if (contour.length > 12) cands.push({ pix: q.slice(0, qt), size: qt, raw: contour.map(([x, y]) => [x / sc, y / sc]) });
+  }
+  S.img = img; S.work = { w, h, sc }; S.source = name; $("areaName").value = name.replace(/\.[^.]+$/, "");
+  if (!cands.length) { progress(0, "No closed outline found. The outline of the area must be one closed line."); banner("No closed shape found"); return; }
+  cands.sort((a, b) => b.size - a.size); cands[0].on = true;
+  S.cands = cands; S.view1 = "sketch"; $("viewTabs").hidden = false; setViewTab();
+  progress(.2, "Outline found");
+  if (cands.length === 1) useSelection();
+  else { S.mode = "pick"; $("pickBox").hidden = false; fitView(); draw();
+    banner(`${cands.length} closed regions found — click the ones that make up the dump area`); }
+}
+
+function morph(m, w, h, r, op) { // erode (0) / dilate (1), square kernel, separable
+  const t = new Uint8Array(m.length), o = new Uint8Array(m.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let v = op ? 0 : 1; for (let k = -r; k <= r; k++) { const xx = x + k; const p = xx < 0 || xx >= w ? 0 : m[y * w + xx]; if (op ? p : !p) { v = op; break; } } t[y * w + x] = v; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let v = op ? 0 : 1; for (let k = -r; k <= r; k++) { const yy = y + k; const p = yy < 0 || yy >= h ? 0 : t[yy * w + x]; if (op ? p : !p) { v = op; break; } } o[y * w + x] = v; }
+  return o;
+}
+function mooreTrace(lab, id, w, h, start) {
+  const at = (x, y) => x >= 0 && y >= 0 && x < w && y < h && lab[y * w + x] === id;
+  const DX = [1, 1, 0, -1, -1, -1, 0, 1], DY = [0, 1, 1, 1, 0, -1, -1, -1];
+  const sx = start % w, sy = (start / w) | 0; let x = sx, y = sy, dir = 6; const out = [[x, y]];
+  for (let it = 0; it < 4 * w * h; it++) {
+    let moved = false;
+    for (let k = 0; k < 8; k++) { const d = (dir + k) % 8, nx = x + DX[d], ny = y + DY[d];
+      if (at(nx, ny)) { x = nx; y = ny; dir = (d + 6) % 8; moved = true; break; } }
+    if (!moved || (x === sx && y === sy)) break;
+    out.push([x, y]);
+  }
+  return out;
+}
+
+// union of selected regions -> closing bridges thin internal lines -> outer outline
+function useSelection() {
+  const { w, h, sc } = S.work, N = w * h, sel = S.cands.filter(c => c.on);
+  if (!sel.length) return banner("Select at least one region");
+  let m = new Uint8Array(N); for (const c of sel) for (const i of c.pix) m[i] = 1;
+  const r = Math.max(2, Math.round(Math.max(w, h) / 300));
+  m = morph(morph(m, w, h, r, 1), w, h, r, 0);
+  m = morph(m, w, h, Math.max(1, r >> 1), 1);
+  const lab = new Int32Array(N), q = new Int32Array(N); let best = 0, bestId = 0, bestStart = 0, nl = 0;
+  for (let s0 = 0; s0 < N; s0++) { if (!m[s0] || lab[s0]) continue; nl++; let qh = 0, qt = 0; q[qt++] = s0; lab[s0] = nl;
+    while (qh < qt) { const i = q[qh++], x = i % w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < N - w ? i + w : -1]) if (j >= 0 && m[j] && !lab[j]) { lab[j] = nl; q[qt++] = j; } }
+    if (qt > best) { best = qt; bestId = nl; bestStart = s0; } }
+  $("pickBox").hidden = true; S.mode = "idle";
+  S.raw = mooreTrace(lab, bestId, w, h, bestStart).map(([x, y]) => [x / sc, y / sc]);
+  makeCorners();
+  readDimensions();
+}
+
+// Outline -> segments: each piece is a straight LINE or a circular ARC.
+//  1. sharp corners = where the direction turns a lot over a short distance
+//     (a curve turns gradually: half the window gives about half the turn; a corner gives all of it)
+//  2. between corners: fit a line; else fit a circle (least squares); else split at the
+//     point farthest from the chord and try again
+//  3. merge neighbours that are the same line or the same circle
+function makeCorners() {
+  const b = bounds(S.raw), big = Math.max(b[2] - b[0], b[3] - b[1]);
+  const tol = +$("detail").value / 100 * big * 0.5;
+  S.segs = segmentOutline(S.raw, tol, big);
+  S.hasArc = S.segs.some(s => s.t === "arc");
+  S.verts = S.segs.map(s => s.a);
+  S.px = S.hasArc ? sampleSegs(S.segs, p => p) : S.verts.slice();
+  S.curved = S.hasArc;
+  const nl = S.segs.filter(s => s.t === "line").length, na = S.segs.length - nl;
+  $("detailVal").textContent = `${nl} L · ${na} A`;
+}
+
+function segmentOutline(raw, tol, big) {
+  let P = raw.slice();
+  if (area(P.map(([x, y]) => [x, -y])) < 0) P.reverse();                 // counter-clockwise (y up)
+  const n = P.length, w = 2;
+  const Q = P.map((_, i) => { let sx = 0, sy = 0; for (let k = -w; k <= w; k++) { const p = P[(i + k + n) % n]; sx += p[0]; sy += p[1]; } return [sx / (2 * w + 1), sy / (2 * w + 1)]; });
+  const turnAt = (i, k) => { const a = Q[(i - k + n) % n], c = Q[i], d = Q[(i + k) % n];
+    const t = Math.atan2(d[1] - c[1], d[0] - c[0]) - Math.atan2(c[1] - a[1], c[0] - a[0]); return Math.abs(((t + 3 * Math.PI) % (2 * Math.PI)) - Math.PI); };
+  const k = Math.max(4, Math.round(n * 0.012)), kh = Math.max(2, k >> 1);
+  const T1 = Q.map((_, i) => turnAt(i, k)), T2 = Q.map((_, i) => turnAt(i, kh));
+  let corners = [];
+  for (let i = 0; i < n; i++) {
+    if (T1[i] < 30 * Math.PI / 180 || T2[i] < 0.72 * T1[i]) continue;          // not sharp enough / gradual = curve
+    let isMax = true; for (let j = -k; j <= k; j++) if (T1[(i + j + n) % n] > T1[i]) { isMax = false; break; }
+    if (isMax && (!corners.length || i - corners[corners.length - 1] > k)) corners.push(i);
+  }
+  if (corners.length > 1 && corners[0] + n - corners[corners.length - 1] <= k) corners.pop();
+  if (!corners.length) corners = [0, n >> 1];                                   // smooth closed curve: split in two
+  // pieces between corners
+  let segs = [];
+  for (let c = 0; c < corners.length; c++) {
+    const i0 = corners[c], i1 = corners[(c + 1) % corners.length], pts = [];
+    for (let i = i0; ; i = (i + 1) % n) { pts.push(Q[i]); if (i === i1 && pts.length > 1) break; }
+    segs.push(...fitPiece(pts, tol, big));
+  }
+  segs = mergeSegs(segs, tol, big);
+  // tiny leftover lines between arcs are fitting noise
+  segs = segs.filter(s => !(s.t === "line" && segs.length > 2 && Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) < tol * 3));
+  for (let i = 0; i < segs.length; i++) segs[i].a = segs[(i - 1 + segs.length) % segs.length].b;   // re-join endpoints
+  segs.forEach(s => { if (s.t === "arc") s.a0 = Math.atan2(s.a[1] - s.c[1], s.a[0] - s.c[0]); });
+  // start at the top-left-most corner
+  let k0 = 0; segs.forEach((s, i) => { if (s.a[1] - s.a[0] * 0.3 < segs[k0].a[1] - segs[k0].a[0] * 0.3) k0 = i; });
+  return segs.slice(k0).concat(segs.slice(0, k0));
+}
+
+function lineDev(pts) {
+  const a = pts[0], b = pts[pts.length - 1], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1e-9;
+  let md = 0, mi = 0; pts.forEach((p, i) => { const d = Math.abs(dy * (p[0] - a[0]) - dx * (p[1] - a[1])) / L; if (d > md) { md = d; mi = i; } });
+  return { md, mi };
+}
+// algebraic (Kåsa) least-squares circle:  x² + y² + Dx + Ey + F = 0
+function fitCircle(pts) {
+  let mx = 0, my = 0; pts.forEach(p => { mx += p[0]; my += p[1]; }); mx /= pts.length; my /= pts.length;
+  let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, sz = 0, sxz = 0, syz = 0, n = pts.length;
+  for (const [X, Y] of pts) { const x = X - mx, y = Y - my, z = x * x + y * y; sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y; sz += z; sxz += x * z; syz += y * z; }
+  const A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]], B = [-sxz, -syz, -sz];
+  const det3 = m => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const d = det3(A); if (Math.abs(d) < 1e-12) return null;
+  const col = (j) => A.map((r, i) => r.map((v, k) => k === j ? B[i] : v));
+  const D = det3(col(0)) / d, E = det3(col(1)) / d, F = det3(col(2)) / d;
+  const cx = -D / 2, cy = -E / 2, r2 = cx * cx + cy * cy - F; if (r2 <= 0) return null;
+  const r = Math.sqrt(r2); let maxres = 0, sw = 0;
+  for (let i = 0; i < n; i++) { const [x, y] = [pts[i][0] - mx, pts[i][1] - my]; maxres = Math.max(maxres, Math.abs(Math.hypot(x - cx, y - cy) - r));
+    if (i) { const a1 = Math.atan2(pts[i - 1][1] - my - cy, pts[i - 1][0] - mx - cx), a2 = Math.atan2(y - cy, x - cx); let da = a2 - a1; da = ((da + 3 * Math.PI) % (2 * Math.PI)) - Math.PI; sw += da; } }
+  return { c: [cx + mx, cy + my], r, maxres, sw };
+}
+function fitPiece(pts, tol, big) {
+  const a = pts[0], b = pts[pts.length - 1];
+  const ld = lineDev(pts);
+  if (ld.md <= tol || pts.length < 8) return [{ t: "line", a, b, pts }];
+  const cf = fitCircle(pts);
+  if (cf && cf.maxres <= tol && cf.r < big * 3 && Math.abs(cf.sw) > 0.25) return [{ t: "arc", a, b, c: cf.c, r: cf.r, sw: cf.sw, pts }];
+  let mi = ld.mi; if (mi < 3 || mi > pts.length - 4) mi = pts.length >> 1;
+  return fitPiece(pts.slice(0, mi + 1), tol, big).concat(fitPiece(pts.slice(mi), tol, big));
+}
+function mergeSegs(segs, tol, big) {
+  let changed = true;
+  while (changed && segs.length > 1) {
+    changed = false;
+    for (let i = 0; i < segs.length && segs.length > 1; i++) {
+      const j = (i + 1) % segs.length, s = segs[i], u = segs[j];
+      const pts = s.pts.concat(u.pts.slice(1));
+      let m = null;
+      if (s.t !== u.t) {
+        // a short "line" where a curve meets a straight edge is really the end of the arc
+        const arc = s.t === "arc" ? s : u, ln = s.t === "line" ? s : u;
+        if (segLen(ln) < 0.2 * segLen(arc)) { const cf = fitCircle(pts);
+          if (cf && cf.maxres <= tol * 1.5 && Math.abs(cf.r - arc.r) < 0.15 * arc.r) m = { t: "arc", a: s.a, b: u.b, c: cf.c, r: cf.r, sw: cf.sw, pts }; }
+        if (m) { segs.splice(i, 1, m); segs.splice(j > i ? j : 0, 1); changed = true; break; }
+        continue;
+      }
+      if (s.t === "line") { if (lineDev(pts).md <= tol) m = { t: "line", a: s.a, b: u.b, pts }; }
+      else if (Math.abs(s.r - u.r) < 0.15 * Math.max(s.r, u.r) && Math.hypot(s.c[0] - u.c[0], s.c[1] - u.c[1]) < 0.15 * Math.max(s.r, u.r)) {
+        const cf = fitCircle(pts); if (cf && cf.maxres <= tol * 1.2) m = { t: "arc", a: s.a, b: u.b, c: cf.c, r: cf.r, sw: cf.sw, pts };
+      }
+      if (m) { segs.splice(i, 1, m); segs.splice(j > i ? j : 0, 1); changed = true; break; }
+    }
+  }
+  return segs;
+}
+// segments -> polygon points (arcs sampled every ≤ 4°), mapped through `map`
+function sampleSegs(segs, map) {
+  const out = [];
+  for (const s of segs) {
+    out.push(map(s.a));
+    if (s.t === "arc") { const steps = Math.max(2, Math.ceil(Math.abs(s.sw) / (4 * Math.PI / 180)));
+      for (let k = 1; k < steps; k++) { const t = s.a0 + s.sw * k / steps; out.push(map([s.c[0] + s.r * Math.cos(t), s.c[1] + s.r * Math.sin(t)])); } }
+  }
+  return out;
+}
+const segLen = s => s.t === "line" ? Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) : Math.abs(s.sw) * s.r;
+const segMid = s => s.t === "line" ? [(s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) / 2] : [s.c[0] + s.r * Math.cos(s.a0 + s.sw / 2), s.c[1] + s.r * Math.sin(s.a0 + s.sw / 2)];
+
+// =====================================================================================
+// ROUND 1 · step B — read the numbers written on the sketch (OCR)
+// =====================================================================================
+let ocrWorker = null;
+async function readDimensions() {
+  S.dets = []; S.poly = null; S.fit = null;
+  initDims(); fitView(); draw();
+  try {
+    if (!ocrWorker) {
+      progress(.25, "Loading the text reader (first time only)…");
+      ocrWorker = await Tesseract.createWorker("eng");
+      await ocrWorker.setParameters({ tessedit_char_whitelist: "0123456789.,minftcMN ", tessedit_pageseg_mode: "7" });
+    }
+    // find each text label, turn it level, and read it on its own
+    // single characters right next to a corner are corner letters (A, B, …), not dimensions
+    const pb = bounds(S.px), near = Math.max(pb[2] - pb[0], pb[3] - pb[1]) * 0.12;
+    const labels = findTextLabels().filter(l => !(l.n === 1 && S.verts.some(([x, y]) => Math.hypot(x - l.cx, y - l.cy) < near)));
+    const found = [];
+    for (let k = 0; k < labels.length; k++) {
+      progress(.3 + .6 * k / labels.length, `Reading dimensions… (label ${k + 1} of ${labels.length})`);
+      const d = await readLabel(labels[k]); if (d) found.push(d);
+    }
+    S.dets = found;
+  } catch (err) {
+    console.error(err);
+    progress(1, "Could not load the text reader (needs internet). Enter the dimensions by hand.");
+  }
+  assignDims();
+  progress(1, S.dets.length ? `Read ${S.dets.length} number(s) from the sketch` : "No numbers found on the sketch — please enter the dimensions");
+  renderDims(); draw();
+}
+
+// Text labels = clusters of small ink blobs (characters). Lines, arrows and the outline are
+// long thin blobs and are skipped. Orientation of each cluster from PCA of its pixels.
+function findTextLabels() {
+  const img = S.img, sc = Math.min(1, 1400 / Math.max(img.width, img.height)), up = sc < 1 ? sc : Math.min(3, 1400 / Math.max(img.width, img.height));
+  const w = Math.round(img.width * up), h = Math.round(img.height * up), N = w * h;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); g.drawImage(img, 0, 0, w, h);
+  const p = g.getImageData(0, 0, w, h).data, ink = new Uint8Array(N);
+  for (let i = 0; i < N; i++) ink[i] = Math.min(p[i * 4], p[i * 4 + 1], p[i * 4 + 2]) < 160 ? 1 : 0;
+  // 8-connected ink blobs
+  const lab = new Int32Array(N), q = new Int32Array(N), blobs = [];
+  for (let s0 = 0; s0 < N; s0++) {
+    if (!ink[s0] || lab[s0]) continue;
+    const id = blobs.length + 1; let qh = 0, qt = 0; q[qt++] = s0; lab[s0] = id;
+    let x0 = w, y0 = h, x1 = 0, y1 = 0;
+    while (qh < qt) { const i = q[qh++], x = i % w, y = (i / w) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const j = yy * w + xx; if (ink[j] && !lab[j]) { lab[j] = id; q[qt++] = j; } } }
+    blobs.push({ id, x0, y0, x1, y1, n: qt, pix: q.slice(0, qt) });
+  }
+  const big = Math.max(w, h);
+  const chars = blobs.filter(b => { const bw = b.x1 - b.x0 + 1, bh = b.y1 - b.y0 + 1, m = Math.max(bw, bh);
+    return m < big * 0.07 && m > big * 0.006 && b.n > 6 && b.n / (bw * bh) > 0.08; });
+  // estimate character size, cluster neighbours into labels
+  const hs = chars.map(b => Math.max(b.x1 - b.x0, b.y1 - b.y0) + 1).sort((a, b) => a - b), ch = hs[hs.length >> 1] || 10;
+  const parent = chars.map((_, i) => i), find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
+  for (let i = 0; i < chars.length; i++) for (let j = i + 1; j < chars.length; j++) {
+    const a = chars[i], b = chars[j], gx = Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1)), gy = Math.max(0, Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
+    if (Math.hypot(gx, gy) < ch * 0.9) parent[find(i)] = find(j); }
+  const groups = {}; chars.forEach((b, i) => (groups[find(i)] ??= []).push(b));
+  const labels = [];
+  for (const grp of Object.values(groups)) {
+    let n = 0, mx = 0, my = 0;
+    for (const b of grp) for (const i of b.pix) { mx += i % w; my += (i / w) | 0; n++; }
+    mx /= n; my /= n;
+    let sxx = 0, syy = 0, sxy = 0;
+    for (const b of grp) for (const i of b.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+    const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);           // main axis of the label
+    const ca = Math.cos(ang), sa = Math.sin(ang); let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+    for (const b of grp) for (const i of b.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my, u = dx * ca + dy * sa, v = -dx * sa + dy * ca;
+      if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+    const L = u1 - u0, T = v1 - v0;
+    if (grp.length < 1 || L < ch * 0.5) continue;
+    // a single-character blob reads as horizontal; long labels use their axis
+    const axis = grp.length === 1 ? 0 : (L > T * 1.3 ? ang : ang + Math.PI / 2);
+    // clean bitmap of just this label's pixels (no nearby lines)
+    let bx0 = w, by0 = h, bx1 = 0, by1 = 0; for (const b of grp) { bx0 = Math.min(bx0, b.x0); by0 = Math.min(by0, b.y0); bx1 = Math.max(bx1, b.x1); by1 = Math.max(by1, b.y1); }
+    const bm = document.createElement("canvas"); bm.width = bx1 - bx0 + 1; bm.height = by1 - by0 + 1;
+    const bg = bm.getContext("2d"), id = bg.createImageData(bm.width, bm.height);
+    id.data.fill(255); for (const b of grp) for (const i of b.pix) { const o = (((i / w) | 0) - by0) * bm.width + (i % w - bx0); id.data[o * 4] = id.data[o * 4 + 1] = id.data[o * 4 + 2] = 0; }
+    bg.putImageData(id, 0, 0);
+    labels.push({ cx: mx / up, cy: my / up, ang: axis, len: Math.max(L, T) / up, thick: Math.min(L, T) / up, n: grp.length,
+      bm, bmx: (mx - bx0), bmy: (my - by0), up, lenU: Math.max(L, T), thickU: Math.min(L, T) });
+  }
+  // dimension lines: long, thin blobs (arrow lines). Axis and extent by PCA.
+  S.dimLines = [];
+  for (const bl of blobs) {
+    const bw = bl.x1 - bl.x0 + 1, bh = bl.y1 - bl.y0 + 1; if (Math.max(bw, bh) < big * 0.05) continue;
+    let mx = 0, my = 0; for (const i of bl.pix) { mx += i % w; my += (i / w) | 0; } mx /= bl.n; my /= bl.n;
+    let sxx = 0, syy = 0, sxy = 0; for (const i of bl.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+    const a = 0.5 * Math.atan2(2 * sxy, sxx - syy), ca = Math.cos(a), sa = Math.sin(a); let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+    for (const i of bl.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my, u = dx * ca + dy * sa, v = -dx * sa + dy * ca; if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+    if (v1 - v0 > (u1 - u0) * 0.12) continue;                                   // not thin -> outline or shape, not a dimension line
+    S.dimLines.push({ cx: (mx + ca * (u0 + u1) / 2) / up, cy: (my + sa * (u0 + u1) / 2) / up, ang: a, len: (u1 - u0) / up, thick: (v1 - v0) / up });
+  }
+  return labels.filter(l => l.n >= 1);
+}
+
+// crop a label, rotate it level (both ways up), OCR it as one line, keep the best numeric reading
+async function readLabel(lb) {
+  const pad = lb.thickU * 0.6 + 4, Lw = lb.lenU + 2 * pad, Lh = lb.thickU + 2 * pad;
+  const SC = Math.max(1, Math.min(8, 48 / Math.max(6, lb.thickU)));
+  let best = null;
+  for (const flip of [0, Math.PI]) {
+    const a = lb.ang + flip, c = document.createElement("canvas"); c.width = Math.ceil(Lw * SC) + 40; c.height = Math.ceil(Lh * SC) + 40;
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+    g.translate(c.width / 2, c.height / 2); g.scale(SC, SC); g.rotate(-a); g.translate(-lb.bmx, -lb.bmy); g.drawImage(lb.bm, 0, 0);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height), p = d.data;
+    for (let i = 0; i < p.length; i += 4) { const v = Math.min(p[i], p[i + 1], p[i + 2]) < 170 ? 0 : 255; p[i] = p[i + 1] = p[i + 2] = v; }
+    g.putImageData(d, 0, 0);
+    const { data } = await ocrWorker.recognize(c);
+    const txt = (data.text || "").replace(/\s+/g, " ").trim().replace(",", ".");
+    // a dimension label looks like "12", "12 in", "176.3607mm" — number first, optional unit after
+    const m = txt.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z0-9]{0,3})$/);
+    if (!m) continue;
+    const score = data.confidence + m[1].length * 3 + (m[2] ? 10 : 0);
+    if (!best || score > best.score) best = { score, text: m[1], value: parseFloat(m[1]), conf: data.confidence, raw: txt };
+  }
+  if (!best || !(best.value > 0) || best.conf < 10) return null;
+  const deg = ((lb.ang * 180 / Math.PI) % 180 + 180) % 180;
+  const ang = deg < 15 || deg > 165 ? 0 : Math.abs(deg - 90) < 15 ? 90 : deg;
+  // the arrow line this number sits on: parallel, close beside the text, text centre within its length
+  let span = null, bd = Infinity;
+  for (const L of S.dimLines || []) {
+    let da = Math.abs(L.ang - lb.ang) % Math.PI; da = Math.min(da, Math.PI - da); if (da > 0.2) continue;
+    const dx = lb.cx - L.cx, dy = lb.cy - L.cy, along = dx * Math.cos(L.ang) + dy * Math.sin(L.ang), off = Math.abs(-dx * Math.sin(L.ang) + dy * Math.cos(L.ang));
+    if (Math.abs(along) > L.len / 2 || off > lb.thick * 3 + 10) continue;
+    if (off < bd) { bd = off; span = L.len; }
+  }
+  return { value: best.value, text: best.text, raw: best.raw, x: lb.cx, y: lb.cy, ang, conf: best.conf, span };
+}
+
+async function ocrAt(deg) {
+  const img = S.img, SCALE = Math.min(2, 1800 / Math.max(img.width, img.height));
+  const a = deg * Math.PI / 180, W = img.width * SCALE, H = img.height * SCALE;
+  const cw = Math.ceil(Math.abs(W * Math.cos(a)) + Math.abs(H * Math.sin(a))), ch = Math.ceil(Math.abs(W * Math.sin(a)) + Math.abs(H * Math.cos(a)));
+  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
+  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cw, ch);
+  g.translate(cw / 2, ch / 2); g.rotate(a); g.drawImage(img, -W / 2, -H / 2, W, H);
+  const { data } = await ocrWorker.recognize(c);
+  const words = data.words || [];
+  const out = [];
+  for (const wd of words) {
+    const m = (wd.text || "").replace(",", ".").match(/\d+(\.\d+)?/);
+    if (!m || wd.confidence < 70) continue;
+    const v = parseFloat(m[0]); if (!(v > 0)) continue;
+    // map the word centre back to the original image
+    const cx = (wd.bbox.x0 + wd.bbox.x1) / 2 - cw / 2, cy = (wd.bbox.y0 + wd.bbox.y1) / 2 - ch / 2;
+    const ox = (cx * Math.cos(-a) - cy * Math.sin(-a) + W / 2) / SCALE, oy = (cx * Math.sin(-a) + cy * Math.cos(-a) + H / 2) / SCALE;
+    out.push({ value: v, text: m[0], x: ox, y: oy, ang: -deg, conf: wd.confidence, len: (wd.bbox.x1 - wd.bbox.x0) / SCALE, digits: m[0].replace(".", "").length });
+  }
+  return out;
+}
+// the same label read at several rotations -> keep the best reading
+function dedupe(list) {
+  list.sort((a, b) => (b.digits - a.digits) || (b.conf - a.conf));
+  const keep = [];
+  for (const d of list) { const r = Math.max(12, d.len * 0.6); if (!keep.some(k => Math.hypot(k.x - d.x, k.y - d.y) < r)) keep.push(d); }
+  return keep;
+}
+
+// =====================================================================================
+// ROUND 1 · step C — which number measures what
+// =====================================================================================
+function initDims() {
+  if (!S.hasArc) S.dims = [...S.verts.map((_, i) => ({ kind: "edge", i, value: null, src: null, req: true })),
+    { kind: "width", value: null, src: null, req: false }, { kind: "height", value: null, src: null, req: false }];
+  else {
+    S.dims = [{ kind: "width", value: null, src: null, req: true }, { kind: "height", value: null, src: null, req: true }];
+    let ra = 0;
+    S.segs.forEach((s, i) => S.dims.push(s.t === "line" ? { kind: "edge", i, value: null, src: null } : { kind: "radius", i, n: ++ra, value: null, src: null }));
+  }
+  S.hl = null;
+}
+const edgeNamePx = i => letter(i) + letter((i + 1) % S.verts.length);
+function dimName(d) { return d.kind === "edge" ? edgeNamePx(d.i) : d.kind === "radius" ? `R${d.n} (arc ${edgeNamePx(d.i)})` : d.kind === "width" ? "Width" : "Height"; }
+// the same quantity measured on the drawing (image px)
+function measurePx(d) {
+  if (d.kind === "width" || d.kind === "height") { const b = bounds(S.px); return d.kind === "width" ? b[2] - b[0] : b[3] - b[1]; }
+  const s = S.segs ? S.segs[d.i] : null;
+  if (!S.hasArc) { const a = S.verts[d.i], b = S.verts[(d.i + 1) % S.verts.length]; return Math.hypot(b[0] - a[0], b[1] - a[1]); }
+  return d.kind === "radius" ? s.r : segLen(s);
+}
+
+function nearDist(d, m) { const s = segPx(m.i); return segDist([d.x, d.y], s.a, s.b) / 1000; }
+function assignDims() {
+  initDims();
+  const b = bounds(S.px), big = Math.max(b[2] - b[0], b[3] - b[1]);
+  const cand = [];   // [score, detIndex, dimIndex]
+  // a number labels the straight edge it sits beside: short perpendicular distance, inside the edge span
+  const nearEdge = (d, k, a, c, di) => {
+    const dx = c[0] - a[0], dy = c[1] - a[1], L2 = dx * dx + dy * dy; if (L2 < (big * 0.12) ** 2 && S.hasArc) return;
+    const t = ((d.x - a[0]) * dx + (d.y - a[1]) * dy) / L2; if (t < 0.05 || t > 0.95) return;
+    const dist = Math.abs(dx * (d.y - a[1]) - dy * (d.x - a[0])) / Math.sqrt(L2);
+    if (dist < big * (S.hasArc ? 0.08 : 0.16)) cand.push([dist + Math.abs(t - 0.5) * 0.2 * Math.sqrt(L2), k, di]);
+  };
+  S.dets.forEach((d, k) => {
+    d.use = null;
+    if (d.span) {      // matched by the length of its dimension line (strongest evidence)
+      S.dims.forEach((m, di) => { const e = Math.abs(measurePx(m) - d.span) / d.span; if (e < 0.12) cand.push([-2e6 + e * 1e3 + (m.kind === "edge" ? nearDist(d, m) : 0), k, di]); });
+      if (cand.some(c => c[1] === k)) return;
+    }
+    if (!S.hasArc) S.verts.forEach((a, i) => nearEdge(d, k, a, S.verts[(i + 1) % S.verts.length], i));
+    else {
+      // overall size: horizontal number -> width, vertical number -> height (largest wins)
+      if (d.ang === 0) cand.push([-1e6 - d.value, k, 0]); else if (d.ang === 90) cand.push([-1e6 - d.value, k, 1]);
+      S.dims.forEach((m, di) => { if (m.kind === "edge") { const s = S.segs[m.i]; nearEdge(d, k, s.a, s.b, di); } });
+    }
+  });
+  cand.sort((a, b) => a[0] - b[0]);
+  for (const [, k, i] of cand) {
+    const d = S.dets[k], dim = S.dims[i];
+    if (d.use != null || dim.value != null) continue;
+    dim.value = d.value; dim.src = "sketch"; dim.det = k; d.use = i;
+  }
+}
+
+function renderDims() {
+  $("dimCard").hidden = false;
+  const missing = S.dims.filter(d => d.req && d.value == null).length, read = S.dims.filter(d => d.src === "sketch").length;
+  const nl = S.segs.filter(s => s.t === "line").length, na = S.segs.length - nl;
+  $("dimIntro").innerHTML = S.hasArc
+    ? `Outline with <b>${nl} straight edge(s)</b> and <b>${na} arc(s)</b>. Needed: the <b>overall width and height</b>. Edge lengths and arc radii are optional; when given they are checked against the drawing.`
+    : `Polygon with <b>${S.verts.length} corners</b> (${S.verts.map((_, i) => letter(i)).join(", ")}). Each edge needs its length.`;
+  $("dimIntro").innerHTML += `<br>Read from sketch: <b>${read}</b> · still needed: <b class="${missing ? "warn" : "ok"}">${missing}</b>. All values are in metres.`;
+  $("dimTable").innerHTML = S.dims.map((d, k) => `<tr data-k="${k}" class="${S.hl === k ? "sel" : ""}">
+      <td class="n">${dimName(d)}</td>
+      <td><input type="number" step="0.01" min="0" data-k="${k}" value="${d.value ?? ""}" placeholder="${d.req ? "enter" : "optional"}"></td><td class="u">m</td>
+      <td>${d.src === "sketch" ? '<span class="tag ok">read from sketch</span>' : d.src === "user" ? '<span class="tag warn">entered</span>' : d.req ? '<span class="tag bad">needed</span>' : '<span class="tag" style="color:var(--muted)">optional</span>'}</td>
+      <td class="u">${S.fit && S.fit.len[k] != null ? f(S.fit.len[k]) : ""}</td></tr>`).join("");
+  $("dimTable").querySelectorAll("input").forEach(el => {
+    el.onchange = () => { const d = S.dims[+el.dataset.k], v = parseFloat(el.value);
+      if (d.det != null && S.dets[d.det]) S.dets[d.det].use = null;
+      d.value = v > 0 ? v : null; d.src = v > 0 ? "user" : null; d.det = null; renderDims(); draw(); };
+    el.onfocus = () => { S.hl = +el.dataset.k; draw(); };
+  });
+  const extra = S.dets.map((d, k) => ({ d, k })).filter(o => o.d.use == null);
+  $("extraBox").innerHTML = extra.length ? `<h3>Other numbers on the sketch</h3><div class="chips">${extra.map(({ d, k }) =>
+    `<span class="chip">${d.text}<select data-k="${k}"><option value="">not used</option>${S.dims.map((m, j) => `<option value="${j}">→ ${dimName(m)}</option>`).join("")}</select></span>`).join("")}</div>
+    <p class="hint">Not every number is a size of the area (e.g. an offset to a centre point). Assign one if it measures something in the list.</p>` : "";
+  $("extraBox").querySelectorAll("select").forEach(el => el.onchange = () => {
+    if (el.value === "") return; const d = S.dets[+el.dataset.k], dim = S.dims[+el.value];
+    if (dim.det != null && S.dets[dim.det]) S.dets[dim.det].use = null;
+    dim.value = d.value; dim.src = "sketch"; dim.det = +el.dataset.k; d.use = +el.value; renderDims(); draw(); });
+  const ok = S.dims.some(d => d.value > 0);
+  $("buildBtn").disabled = !ok;
+  if (!S.fit) $("buildMsg").innerHTML = ok ? (missing ? `<span class="warn">${missing} needed value(s) missing — estimated from the drawing's proportions. Enter them for an exact shape.</span>` : "All needed dimensions known ✓")
+    : S.hasArc ? "Enter at least the overall width." : "Enter at least one edge length.";
+}
+
+// =====================================================================================
+// ROUND 1 · step D — build the real shape from the dimensions
+// =====================================================================================
+// Polygon: the drawing gives the edge DIRECTIONS, the numbers give the edge LENGTHS.
+// A hand sketch is rarely to scale, so with the given lengths the outline would not close.
+// Closure condition:  Σ Lᵢ·(cos aᵢ, sin aᵢ) = 0.  We turn each edge by a small δᵢ (and let
+// unknown lengths change by εᵢ) with the least total change: minimum-norm solution of the
+// linearised closure  A·x = −g,  x = Aᵀ(AAᵀ)⁻¹(−g),  repeated until the gap is ~0.
+function solvePolygon() {
+  const P = S.verts.map(([x, y]) => [x, -y]), n = P.length;
+  const ang = [], drawn = [];
+  for (let i = 0; i < n; i++) { const a = P[i], b = P[(i + 1) % n]; ang.push(Math.atan2(b[1] - a[1], b[0] - a[0])); drawn.push(Math.hypot(b[0] - a[0], b[1] - a[1])); }
+  const given = S.verts.map((_, i) => { const d = S.dims.find(x => x.kind === "edge" && x.i === i); return d && d.value > 0 ? +d.value : null; });
+  // scale for edges without a number: from the overall width/height if known (less affected by line thickness), else from the known edges
+  const whR = S.dims.filter(d => (d.kind === "width" || d.kind === "height") && d.value > 0).map(d => d.value / measurePx(d));
+  const ratios = (whR.length ? whR : given.map((v, i) => v ? v / drawn[i] : null).filter(Boolean)).sort((a, b) => a - b);
+  const s0 = ratios[ratios.length >> 1];
+  const L = given.map((v, i) => v ?? drawn[i] * s0);
+  const a0 = ang.slice();
+  for (let it = 0; it < 50; it++) {
+    let gx = 0, gy = 0; for (let i = 0; i < n; i++) { gx += L[i] * Math.cos(ang[i]); gy += L[i] * Math.sin(ang[i]); }
+    if (Math.hypot(gx, gy) < 1e-9 * (1 + s0)) break;
+    // columns: δᵢ -> Lᵢ·(−sin, cos);  unknown lengths: uⱼ = εⱼ/Lⱼ -> Lⱼ·(cos, sin)
+    const cols = [];
+    for (let i = 0; i < n; i++) cols.push({ t: "a", i, c: [-L[i] * Math.sin(ang[i]), L[i] * Math.cos(ang[i])] });
+    for (let i = 0; i < n; i++) if (given[i] == null) cols.push({ t: "l", i, c: [L[i] * Math.cos(ang[i]), L[i] * Math.sin(ang[i])] });
+    let m00 = 0, m01 = 0, m11 = 0; for (const { c } of cols) { m00 += c[0] * c[0]; m01 += c[0] * c[1]; m11 += c[1] * c[1]; }
+    const det = m00 * m11 - m01 * m01; if (Math.abs(det) < 1e-12) break;
+    const lx = (m11 * -gx - m01 * -gy) / det, ly = (-m01 * -gx + m00 * -gy) / det;   // (AAᵀ)⁻¹(−g)
+    for (const { t, i, c } of cols) { const x = c[0] * lx + c[1] * ly; if (t === "a") ang[i] += x; else L[i] *= 1 + x; }
+  }
+  const V = [[0, 0]]; for (let i = 0; i < n - 1; i++) { const p = V[i]; V.push([p[0] + L[i] * Math.cos(ang[i]), p[1] + L[i] * Math.sin(ang[i])]); }
+  let gx = 0, gy = 0; for (let i = 0; i < n; i++) { gx += L[i] * Math.cos(ang[i]); gy += L[i] * Math.sin(ang[i]); }
+  const turn = ang.map((a, i) => { let d = (a - a0[i]) * 180 / Math.PI; d = ((d + 540) % 360) - 180; return d; });
+  const bV = bounds(V), len = S.dims.map(d => d.kind === "edge" ? L[d.i] : d.kind === "width" ? bV[2] - bV[0] : bV[3] - bV[1]);
+  return { V, len, turn, gap: Math.hypot(gx, gy), estimated: given.filter(v => v == null).length };
+}
+
+// Lines + arcs (a drawing, normally to scale): one scale factor s = median(value / measured)
+// over every given dimension, then each dimension is checked: error = (measured·s − value) / value.
+// If ONLY width and height are given, x and y are scaled separately to match both.
+function solveScaled() {
+  const b = bounds(S.px), known = S.dims.map((d, k) => ({ d, k })).filter(o => o.d.value > 0);
+  let sx, sy;
+  const onlyWH = known.length && known.every(o => o.d.kind === "width" || o.d.kind === "height");
+  if (onlyWH) { const W = S.dims.find(d => d.kind === "width").value, H = S.dims.find(d => d.kind === "height").value; sx = W ? W / (b[2] - b[0]) : H / (b[3] - b[1]); sy = H ? H / (b[3] - b[1]) : sx; }
+  else { const r = known.map(o => o.d.value / measurePx(o.d)).sort((a, b) => a - b); sx = sy = r[r.length >> 1]; }
+  const toM = ([x, y]) => [(x - b[0]) * sx, (b[3] - y) * sy], sg = Math.sqrt(sx * sy);
+  const V = sampleSegs(S.segs, toM);
+  S.segsM = S.segs.map(s => { const m = { t: s.t, a: toM(s.a), b: toM(s.b) };
+    if (s.t === "arc") { m.c = toM(s.c); m.r = s.r * sg; m.sw = -s.sw; m.a0 = Math.atan2(m.a[1] - m.c[1], m.a[0] - m.c[0]); } return m; });
+  const len = S.dims.map(d => d.kind === "width" ? (b[2] - b[0]) * sx : d.kind === "height" ? (b[3] - b[1]) * sy : measurePx(d) * sg);
+  const err = known.map(o => ({ name: dimName(o.d), e: (len[o.k] - o.d.value) / o.d.value * 100 }));
+  return { V, len, sx, sy, err, onlyWH, distort: Math.abs(sx / sy - 1) * 100 };
+}
+
+$("buildBtn").onclick = () => {
+  const edgeKnown = S.dims.some(d => d.kind === "edge" && d.value > 0);
+  const r = S.hasArc || !edgeKnown ? solveScaled() : solvePolygon();
+  S.fitScaled = S.hasArc || !edgeKnown;
+  if (!S.hasArc) S.segsM = null;
+  const b = bounds(r.V); S.poly = r.V.map(([x, y]) => [x - b[0], y - b[1]]); S.fit = r;
+  if (S.segsM) S.segsM.forEach(m => { for (const k of ["a", "b", "c"]) if (m[k]) m[k] = [m[k][0] - b[0], m[k][1] - b[1]]; });
+  autoEntry();
+  if (S.fitScaled) {
+    const worst = r.err.reduce((w, e) => Math.abs(e.e) > Math.abs(w.e) ? e : w, { e: 0 });
+    $("buildMsg").innerHTML = r.onlyWH
+      ? (S.dims.find(d => d.kind === "width").value && S.dims.find(d => d.kind === "height").value
+        ? (r.distort > 3 ? `<span class="warn">Drawing proportions differ from the numbers by ${f(r.distort, 1)} % — stretched to match width and height.</span>` : `<span class="ok">Drawing proportions match width and height (${f(r.distort, 1)} % off) ✓</span>`)
+        : `<span class="warn">Only one overall size given — the other is taken from the drawing's proportions.</span>`)
+      : (Math.abs(worst.e) > 3 ? `<span class="warn">Scaled with one factor. Largest mismatch: ${worst.name} ${worst.e > 0 ? "+" : ""}${f(worst.e, 1)} % — check that number or the drawing.</span>`
+        : `<span class="ok">All given dimensions match the drawing within ${f(Math.abs(worst.e), 1)} % ✓</span>`);
+  } else {
+    const mx = Math.max(...r.turn.map(Math.abs));
+    $("buildMsg").innerHTML = `Shape closes ✓ (gap ${f(r.gap, 3)} m). ` +
+      (mx > 2 ? `<span class="warn">The sketch is not to scale: edge directions were turned by up to ${f(mx, 1)}° so the given lengths fit together.</span>` : `<span class="ok">The sketch matches the numbers (largest angle change ${f(mx, 1)}°).</span>`) +
+      (r.estimated ? `<br><span class="warn">${r.estimated} edge(s) estimated from the drawing.</span>` : "");
+  }
+  $("saveCard").hidden = false; S.view1 = "real"; setViewTab(); renderDims(); update1(); fitView(); draw();
+  banner("Real shape built from the dimensions ✓  Set the entry point and save");
+};
+
+function autoEntry() {
+  const p = S.poly; if (!p) return; let best = -Infinity, bi = 0;
+  for (let i = 0; i < p.length; i++) {
+    const a = p[i], b = p[(i + 1) % p.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (!L) continue;
+    const ny = -(b[0] - a[0]) / L, score = (ny < -0.7 ? 1e6 : 0) + L - (a[1] + b[1]) / 2;
+    if (score > best) { best = score; bi = i; }
+  }
+  const a = p[bi], b = p[(bi + 1) % p.length];
+  S.entry = { i: bi, pt: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+}
+function update1() {
+  if (!S.poly) { $("stats1").innerHTML = ""; return; }
+  const b = bounds(S.poly);
+  $("stats1").innerHTML = [["Corners", S.poly.length], ["Width × height", `${f(b[2] - b[0])} × ${f(b[3] - b[1])} m`],
+    ["Area", `${f(Math.abs(area(S.poly)), 1)} m²`], ["Perimeter", `${f(perim(S.poly), 1)} m`]].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
+}
+$("detail").oninput = () => { if (S.raw) { makeCorners(); assignDims(); renderDims(); S.poly = null; S.fit = null; S.view1 = "sketch"; setViewTab(); fitView(); draw(); } };
+
+function resetRound1() {
+  Object.assign(S, { cands: null, raw: null, px: null, segs: null, segsM: null, verts: null, hasArc: false, dims: [], dets: [], poly: null, fit: null, entry: null, view1: "sketch", mode: "idle", hl: null });
+  $("dimCard").hidden = true; $("saveCard").hidden = true; $("pickBox").hidden = true; $("buildMsg").textContent = "";
+}
+
+// ---- save / library
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+function areaRecord() {
+  return { name: $("areaName").value.trim() || "Area " + new Date().toLocaleString(), units: "m", polygon: S.poly, entry: S.entry,
+    dimensions: S.dims.map(d => ({ name: dimName(d), value: d.value, source: d.src || "estimated" })),
+    area_m2: Math.abs(area(S.poly)), perimeter_m: perim(S.poly), source: S.source, saved: new Date().toISOString() };
+}
+$("saveArea").onclick = () => {
+  if (!S.poly) return banner("Build the shape first");
+  const rec = areaRecord(), lib = store.get("zadp.areas", []);
+  const i = lib.findIndex(a => a.name === rec.name); if (i >= 0) lib[i] = rec; else lib.unshift(rec);
+  store.set("zadp.areas", lib); S.areaSaved = rec; saveSession(); renderLib(); setRound(2);
+};
+function renderLib() {
+  const lib = store.get("zadp.areas", []);
+  $("lib").innerHTML = lib.length ? "" : '<span class="hint">None yet</span>';
+  lib.forEach((a, k) => {
+    const d = document.createElement("div"); d.innerHTML = `<span title="${a.name}">${a.name} · ${f(a.area_m2, 0)} m²</span>`;
+    const lo = document.createElement("button"); lo.textContent = "Load"; lo.onclick = () => loadRecord(a);
+    const ex = document.createElement("button"); ex.textContent = "⬇"; ex.title = "Export"; ex.onclick = () => download((a.name || "area") + ".json", a);
+    const del = document.createElement("button"); del.textContent = "✕"; del.className = "danger";
+    del.onclick = () => { lib.splice(k, 1); store.set("zadp.areas", lib); renderLib(); };
+    d.append(lo, ex, del); $("lib").append(d);
+  });
+}
+function loadRecord(a) {
+  resetRound1(); S.img = null; S.poly = a.polygon; S.entry = a.entry; S.areaSaved = a; S.source = a.source;
+  $("areaName").value = a.name; $("saveCard").hidden = false; S.view1 = "real"; $("viewTabs").hidden = true;
+  update1(); setRound(1); banner(`Loaded "${a.name}"`);
+}
+function download(name, obj) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" })); a.download = name; a.click(); }
+
+// =====================================================================================
+// ROUND 2 — fleet (identified by payload)
+// =====================================================================================
+// loose (after digging) density ρ and angle of repose θ — typical values
+const MATERIALS = [
+  { name: "Waste rock / overburden (blasted)", rho: 1.8, rep: 37 },
+  { name: "Iron ore (blasted)", rho: 2.4, rep: 37 },
+  { name: "Coal (run of mine)", rho: 0.9, rep: 38 },
+  { name: "Topsoil / clay", rho: 1.5, rep: 35 },
+  { name: "Sand & gravel", rho: 1.7, rep: 34 },
+];
+
+let tid = 1;
+function newTruck() {
+  const n = S.fleet.length + 1;
+  return { id: tid++, name: "Truck " + n, payload: null, count: 1, rMode: "calc", rIn: null, mat: 0, L: null, W: null };
+}
+// 4 inputs -> everything else is calculated
+function calc(t) {
+  const m = MATERIALS[t.mat] || MATERIALS[0], tan = Math.tan(m.rep * Math.PI / 180);
+  const V = t.payload > 0 ? t.payload / m.rho : null;                                    // V = P / ρ
+  const r = t.rMode === "in" ? (t.rIn > 0 ? +t.rIn : null) : V ? Math.cbrt(3 * V / (Math.PI * tan)) : null;  // cone: V = ⅓πr²h, h = r·tanθ
+  const L = +t.L || 0, W = +t.W || 0;
+  return { V, r, A: r ? Math.PI * r * r : null, mat: m, tan,
+    mS: W ? W / 2 + 0.16 * W : null, mR: L ? 0.62 * L : null, mF: L ? 0.23 * L : null,     // side = W/2 + 0.16W, rear = 0.62L, front = 0.23L
+    ok: t.payload > 0 && t.count > 0 && r > 0 && L > 0 && W > 0 };
+}
+function shares() {
+  const tot = S.fleet.reduce((s, t) => s + (+t.count || 0), 0) || 1;
+  return S.fleet.map(t => (+t.count || 0) / tot * 100);
+}
+$("addTruck").onclick = () => { const t = newTruck(); S.fleet.push(t); S.sel = t.id; saveSession(); render2(); };
+
+function render2() {
+  const sh = shares(), fv = $("fleetView");
+  if (!S.fleet.length) fv.innerHTML = '<div class="empty">No trucks yet. Press <b>+ Add truck type</b> on the left.</div>';
+  else {
+    const all = S.fleet.map(calc);
+    const maxDim = Math.max(10, ...S.fleet.map((t, k) => (+t.L || 0) + 2 * (all[k].r || 0) + 2));
+    const govI = governing();
+    fv.innerHTML = `<div class="cards">${S.fleet.map((t, k) => { const c = all[k]; return `
+      <div class="tcard ${t.id === S.sel ? "on" : ""}" data-id="${t.id}">
+        <h4>${t.name}</h4><div class="sub">${t.payload ?? "?"} t payload · ${t.count} truck(s) · ${f(sh[k], 0)} % of loads</div>
+        <canvas width="500" height="260" data-k="${k}"></canvas>
+        ${c.ok ? `<div class="stats">
+          <div>Pile radius r</div><div><b>${f(c.r)} m</b></div>
+          <div>Pile area</div><div>${f(c.A, 1)} m²</div>
+          <div>Truck size</div><div>${f(t.L, 1)} × ${f(t.W, 1)} m</div>
+        </div>` : '<p class="hint bad">Fill in all 4 inputs</p>'}</div>`; }).join("")}</div>
+      <table class="fleet"><thead><tr><th>Truck</th><th>Payload t</th><th>Count</th><th>Share %</th><th>Pile r m</th><th>L × W m</th><th>Side m</th><th>Rear m</th><th>Front m</th></tr></thead>
+      <tbody>${S.fleet.map((t, k) => { const c = all[k]; return `<tr class="${govI && govI.ids.includes(t.id) ? "gov" : ""}">
+        <td>${t.name}</td><td>${t.payload ?? "–"}</td><td>${t.count}</td><td>${f(sh[k], 0)}</td><td>${f(c.r)}</td>
+        <td>${t.L ? f(t.L, 1) : "–"} × ${t.W ? f(t.W, 1) : "–"}</td><td>${f(c.mS)}</td><td>${f(c.mR)}</td><td>${f(c.mF)}</td></tr>`; }).join("")}</tbody></table>
+      <p class="hint">Highlighted = the truck that sets the largest margins; Round 3 shrinks the area with these. Truck and pile are drawn to the same scale on every card (bar = 5 m).</p>`;
+    fv.querySelectorAll(".tcard").forEach(el => el.onclick = () => { S.sel = +el.dataset.id; render2(); });
+    fv.querySelectorAll(".tcard canvas").forEach(c => drawTruckCard(c, S.fleet[+c.dataset.k], all[+c.dataset.k], maxDim));
+  }
+  const t = S.fleet.find(x => x.id === S.sel);
+  $("truckForm").innerHTML = t ? truckFormHTML(t) : "";
+  if (t) bindForm(t);
+  const tot = S.fleet.reduce((s, x) => s + (+x.count || 0), 0);
+  $("stats2").innerHTML = `<div>Truck types</div><div>${S.fleet.length}</div><div>Trucks in total</div><div>${tot}</div>`;
+  $("laneW").value = S.laneW ?? ""; $("laneW").placeholder = "auto " + f(laneWidth(), 1);
+  $("toR3").disabled = !S.fleet.length || !S.fleet.every(x => calc(x).ok);
+}
+function drawTruckCard(c, t, k, maxDim) {
+  const g = c.getContext("2d"), W = c.width, H = c.height; g.clearRect(0, 0, W, H);
+  if (!k.ok) return;
+  const s = Math.min((W - 30) / maxDim, (H - 40) / Math.max(2 * k.r, t.W, 1) * 0.9), cy = H / 2 - 6, x0 = 15;
+  g.fillStyle = "#f5a62333"; g.strokeStyle = "#f5a623"; g.lineWidth = 2;
+  g.fillRect(x0, cy - t.W * s / 2, t.L * s, t.W * s); g.strokeRect(x0, cy - t.W * s / 2, t.L * s, t.W * s);
+  g.fillStyle = "#f5a623"; g.fillRect(x0, cy - t.W * s / 2, t.L * s * 0.22, t.W * s * 0.45);
+  g.font = "18px system-ui"; g.fillStyle = "#e6edf3"; g.fillText(`truck ${f(t.L, 1)} × ${f(t.W, 1)} m`, x0, cy - t.W * s / 2 - 8);
+  const px = x0 + t.L * s + k.r * s + 2 * s;
+  g.beginPath(); g.arc(px, cy, k.r * s, 0, Math.PI * 2); g.fillStyle = "#c9a46b55"; g.fill(); g.strokeStyle = "#c9a46b"; g.stroke();
+  g.beginPath(); g.moveTo(px, cy); g.lineTo(px + k.r * s, cy); g.stroke();
+  g.fillStyle = "#e6edf3"; g.fillText(`r = ${f(k.r, 2)} m`, px - k.r * s * 0.7, cy - 8);
+  g.strokeStyle = "#8b9bab"; g.lineWidth = 3; g.beginPath(); g.moveTo(15, H - 10); g.lineTo(15 + 5 * s, H - 10); g.stroke();
+  g.fillStyle = "#8b9bab"; g.font = "16px system-ui"; g.fillText("5 m", 20 + 5 * s, H - 4);
+}
+function truckFormHTML(t) {
+  const k = calc(t), m = k.mat;
+  const inp = (key, label, unit, step = "0.01") =>
+    `<div class="row"><label>${label}</label><input type="number" data-k="${key}" value="${t[key] ?? ""}" step="${step}" min="0" placeholder="enter"><span class="u">${unit}</span></div>`;
+  return `
+  <section class="card">
+    <h2>${t.name}</h2>
+    <div class="row"><label>Name</label><input type="text" data-k="name" value="${t.name}" style="width:170px"></div>
+    <h3>1 · Payload</h3>
+    ${inp("payload", "Payload", "t", "1")}
+    <h3>2 · Number of trucks</h3>
+    ${inp("count", "Trucks of this type", "", "1")}
+    <h3>3 · Pile radius</h3>
+    <div class="tabs"><button data-r="calc" class="${t.rMode !== "in" ? "on" : ""}">Calculate</button><button data-r="in" class="${t.rMode === "in" ? "on" : ""}">I know it</button></div>
+    ${t.rMode === "in" ? inp("rIn", "Pile radius r", "m") : `
+      <div class="row"><select class="wide" data-k="mat">${MATERIALS.map((x, i) => `<option value="${i}" ${i === t.mat ? "selected" : ""}>${x.name} · ρ ${x.rho} t/m³ · θ ${x.rep}°</option>`).join("")}</select></div>
+      <div class="formula">${k.V ? `V = P / ρ = ${t.payload} / ${m.rho} = ${f(k.V, 1)} m³\nCone: V = ⅓·π·r²·h,  h = r·tanθ\nr = ∛(3V / (π·tanθ)) = ${f(k.r)} m` : "Enter the payload to calculate the radius"}</div>`}
+    <h3>4 · Truck size</h3>
+    ${inp("L", "Length", "m")}${inp("W", "Width", "m")}
+    ${k.mS ? `<div class="formula">Margins for Round 3:\nside  = W/2 + 0.16·W = ${f(k.mS)} m\nrear  = 0.62·L       = ${f(k.mR)} m\nfront = 0.23·L       = ${f(k.mF)} m</div>` : ""}
+    <div class="row"><button class="danger" id="delTruck" style="flex:1">Remove this truck type</button></div>
+  </section>`;
+}
+function bindForm(t) {
+  $("truckForm").querySelectorAll("[data-k]").forEach(el => el.onchange = () => {
+    const key = el.dataset.k;
+    if (key === "name") t.name = el.value.trim() || t.name;
+    else if (key === "mat") t.mat = +el.value;
+    else t[key] = el.value === "" ? null : +el.value;
+    saveSession(); render2();
+  });
+  $("truckForm").querySelectorAll("[data-r]").forEach(el => el.onclick = () => { t.rMode = el.dataset.r; saveSession(); render2(); });
+  $("delTruck").onclick = () => { S.fleet = S.fleet.filter(x => x.id !== t.id); S.sel = S.fleet[0]?.id ?? null; saveSession(); render2(); };
+}
+$("toR3").onclick = () => setRound(3);
+
+// =====================================================================================
+// ROUND 3 — safe boundary from the governing (largest) margins
+// =====================================================================================
+function governing() {
+  if (!S.fleet.length) return null;
+  const c = S.fleet.map(calc), pick = key => { let bi = 0; c.forEach((x, i) => { if (x[key] > c[bi][key]) bi = i; }); return bi; };
+  const iS = pick("mS"), iR = pick("mR"), iF = pick("mF");
+  return { side: c[iS].mS, rear: c[iR].mR, front: c[iF].mF, by: { side: S.fleet[iS].name, rear: S.fleet[iR].name, front: S.fleet[iF].name },
+    ids: [...new Set([S.fleet[iS].id, S.fleet[iR].id, S.fleet[iF].id])] };
+}
+function computeSafe() {
+  S.safe = []; S.edgeType = [];
+  if (!S.poly || !S.entry) return;
+  const p = S.poly, n = p.length, m = governing() || { side: 0, rear: 0, front: 0 };
+  S.gov = m;
+  const ea = p[S.entry.i], eb = p[(S.entry.i + 1) % n], el = Math.hypot(eb[0] - ea[0], eb[1] - ea[1]);
+  const en = [(eb[1] - ea[1]) / el, -(eb[0] - ea[0]) / el];
+  const buffers = [];
+  for (let i = 0; i < n; i++) {
+    const a = p[i], b = p[(i + 1) % n], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 1e-9) { S.edgeType.push("side"); continue; }
+    const nrm = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L], dot = nrm[0] * en[0] + nrm[1] * en[1];
+    const t = i === S.entry.i || dot > 0.6 ? "front" : dot < -0.6 ? "rear" : "side";
+    S.edgeType.push(t);
+    const d = m[t]; if (!(d > 0)) continue;
+    const co = new ClipperLib.ClipperOffset(2, 0.05 * K), out = new ClipperLib.Paths();
+    co.AddPath(toC([a, b]), ClipperLib.JoinType.jtRound, ClipperLib.EndType.etOpenRound); co.Execute(out, d * K); buffers.push(...out);
+  }
+  const c = new ClipperLib.Clipper(), sol = new ClipperLib.Paths();
+  c.AddPath(toC(p), ClipperLib.PolyType.ptSubject, true); c.AddPaths(buffers, ClipperLib.PolyType.ptClip, true);
+  c.Execute(ClipperLib.ClipType.ctDifference, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  S.safe = sol.map(fromC);
+}
+function update3() {
+  computeSafe();
+  const A = Math.abs(area(S.poly)), As = Math.max(0, S.safe.reduce((s, q) => s + area(q), 0)), g = S.gov;
+  $("stats3").innerHTML = [["Dump area", `${f(A, 1)} m²`], ["Safe zone", `${f(As, 1)} m²`], ["Usable", `${f(As / A * 100, 1)} %`],
+    ["Side margin", `${f(g.side)} m · ${g.by?.side ?? ""}`], ["Rear margin", `${f(g.rear)} m · ${g.by?.rear ?? ""}`], ["Front margin", `${f(g.front)} m · ${g.by?.front ?? ""}`]]
+    .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
+  banner(As > 0 ? "Safe boundary drawn from the largest truck margins in the fleet" : "⚠ No safe zone left — the area is too small for this fleet");
+  draw();
+}
+
+// =====================================================================================
+// ROUND 4 — Step 2 (Boustrophedon zones) + Step 3 (hexagonal pile grid) + lane
+// =====================================================================================
+const CT = () => ClipperLib.ClipType, PT = () => ClipperLib.PolyType, PF = () => ClipperLib.PolyFillType.pftNonZero;
+function clip(subj, clp, type) {
+  const c = new ClipperLib.Clipper(), sol = new ClipperLib.Paths();
+  c.AddPaths(subj.map(toC), PT().ptSubject, true); if (clp && clp.length) c.AddPaths(clp.map(toC), PT().ptClip, true);
+  c.Execute(type, sol, PF(), PF()); return sol.map(fromC);
+}
+const pieces = paths => paths.filter(p => area(p) > 1e-6);           // outer rings only (no holes expected)
+const rot = ([x, y], a) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+const sumArea = paths => paths.reduce((s, p) => s + area(p), 0);
+function distToEdges([x, y], p) {
+  let d = Infinity;
+  for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length], dx = b[0] - a[0], dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    d = Math.min(d, Math.hypot(a[0] + t * dx - x, a[1] + t * dy - y)); }
+  return d;
+}
+const inAny = (pt, paths) => paths.some(p => pointInPoly(pt, p));
+
+function laneWidth() { return S.laneW > 0 ? +S.laneW : Math.max(0, ...S.fleet.map(t => +t.W || 0)) + 1; }
+
+// entry frame: E = entry point, n = inward normal (depth direction)
+function entryFrame() {
+  const p = S.poly, a = p[S.entry.i], b = p[(S.entry.i + 1) % p.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  return { E: S.entry.pt, n: [-(b[1] - a[1]) / L, (b[0] - a[0]) / L], t: [(b[0] - a[0]) / L, (b[1] - a[1]) / L] };
+}
+const depthOf = (p, F) => (p[0] - F.E[0]) * F.n[0] + (p[1] - F.E[1]) * F.n[1];
+
+// lane: strip of width 2·w from the entry along the inward normal to the back of the area
+function buildLane() {
+  const F = entryFrame(), w = laneWidth(), b = bounds(S.poly);
+  const P = (u, v) => [F.E[0] + F.t[0] * u + F.n[0] * v, F.E[1] + F.t[1] * u + F.n[1] * v];
+  // the lane runs straight in until its centre line reaches the far boundary
+  let far = 0.5; const step = Math.max(0.1, w / 8), lim = 2 * Math.hypot(b[2] - b[0], b[3] - b[1]);
+  while (far < lim && pointInPoly(P(0, far + step), S.poly)) far += step;
+  const rect = [P(-w, -1), P(w, -1), P(w, far), P(-w, far)];
+  // keep only the part connected to the entry
+  let lane = pieces(clip([S.poly], [rect], CT().ctIntersection));
+  lane = lane.filter(q => distToEdges(F.E, q) < w * 0.5 || pointInPoly(F.E, q)).slice(0, 1);
+  const depthMax = lane.length ? Math.max(...lane[0].map(q => depthOf(q, F))) : 0;
+  return { poly: lane, F, w, depthMax,
+    inLine: [P(-w / 2, 0), P(-w / 2, depthMax)], outLine: [P(w / 2, depthMax), P(w / 2, 0)] };
+}
+
+// Boustrophedon cell decomposition at sweep angle `deg`.
+// Critical points = vertices where the outline turns back in x (both neighbours on the same side);
+// only there can the number of pieces cut by the sweep line change.
+function decompose(region, deg) {
+  const a = -deg * Math.PI / 180, R = region.map(p => p.map(q => rot(q, a)));
+  const all = R.flat(), b = bounds(all), eps = Math.max(b[2] - b[0], b[3] - b[1]) * 0.004;
+  let xs = [];
+  for (const p of R) for (let i = 0; i < p.length; i++) {
+    const vx = p[i][0]; let j = i, k = i, px = null, nx = null;
+    for (let s = 1; s < p.length; s++) { const q = p[(i - s + p.length) % p.length][0]; if (Math.abs(q - vx) > eps) { px = q; break; } }
+    for (let s = 1; s < p.length; s++) { const q = p[(i + s) % p.length][0]; if (Math.abs(q - vx) > eps) { nx = q; break; } }
+    if (px != null && nx != null && (px - vx) * (nx - vx) > 0) xs.push(vx);
+  }
+  xs = [b[0], ...xs.filter(x => x > b[0] + eps && x < b[2] - eps).sort((u, v) => u - v), b[2]].filter((x, i, arr) => i === 0 || x - arr[i - 1] > eps);
+  // slabs between critical x's; each connected piece of a slab is a fragment
+  const frags = [];
+  for (let i = 0; i < xs.length - 1; i++) {
+    const rect = [[xs[i], b[1] - 1], [xs[i + 1], b[1] - 1], [xs[i + 1], b[3] + 1], [xs[i], b[3] + 1]];
+    for (const pc of pieces(clip(R, [rect], CT().ctIntersection))) {
+      const side = x => { const ys = pc.filter(q => Math.abs(q[0] - x) < eps * 0.5).map(q => q[1]); return ys.length ? [Math.min(...ys), Math.max(...ys)] : null; };
+      frags.push({ slab: i, poly: pc, L: side(xs[i]), R: side(xs[i + 1]), id: frags.length });
+    }
+  }
+  // fragments touching across a cut line; merge when the connection is one-to-one
+  const parent = frags.map((_, i) => i), find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
+  const rightN = frags.map(() => []), leftN = frags.map(() => []);
+  for (const A of frags) for (const B of frags) {
+    if (B.slab !== A.slab + 1 || !A.R || !B.L) continue;
+    if (Math.min(A.R[1], B.L[1]) - Math.max(A.R[0], B.L[0]) > eps * 0.5) { rightN[A.id].push(B.id); leftN[B.id].push(A.id); }
+  }
+  for (const A of frags) if (rightN[A.id].length === 1) { const B = rightN[A.id][0]; if (leftN[B].length === 1) parent[find(B)] = find(A.id); }
+  const groups = {}; frags.forEach(fr => (groups[find(fr.id)] ??= []).push(fr.poly));
+  const cells = Object.values(groups).map(g => { const u = pieces(clip(g, [], CT().ctUnion)).sort((p, q) => area(q) - area(p))[0]; return u.map(q => rot(q, -a)); })
+    .filter(c => area(c) > eps * eps * 4);
+  return cells;
+}
+
+function bestSweep(region) {
+  let best = null;
+  for (let d = 0; d < 180; d += 5) {
+    const cells = decompose(region, d), minA = Math.min(...cells.map(area));
+    if (!best || cells.length < best.n || (cells.length === best.n && minA > best.minA)) best = { deg: d, n: cells.length, minA };
+  }
+  return best.deg;
+}
+
+// hexagonal lattice of centres inside `cell`, rows aligned to angle `deg`; the phase with most accepted points wins
+function hexIn(cell, deg, r, gap, accept) {
+  const a = -deg * Math.PI / 180, C = cell.map(q => rot(q, a)), b = bounds(C);
+  const d = Math.max(0.2 * r, 2 * r + gap), dy = d * Math.sqrt(3) / 2;
+  let best = [];
+  for (const phx of [0, d / 3, 2 * d / 3]) for (const phy of [0, dy / 2]) {
+    const pts = [];
+    for (let y = b[1] + phy, row = 0; y <= b[3]; y += dy, row++)
+      for (let x = b[0] + phx + (row % 2 ? d / 2 : 0); x <= b[2]; x += d) {
+        if (!pointInPoly([x, y], C)) continue;
+        const w = rot([x, y], -a); if (accept(w, pts)) pts.push(w);
+      }
+    if (pts.length > best.length) best = pts;
+  }
+  return best;
+}
+
+function run4() {
+  if (!S.poly || !S.entry) return;
+  const g = governing(); computeSafe();
+  const lane = buildLane(), F = lane.F;
+  // zones = safe zone minus the lane
+  const region = pieces(clip(S.safe.filter(p => area(p) > 0), lane.poly, CT().ctDifference));
+  if (S.sweep == null) S.sweep = bestSweep(region);
+  let zones = decompose(region, S.sweep).map(poly => ({ poly, depth: depthOf(centroidOf(poly), F) }));
+  zones.sort((p, q) => q.depth - p.depth);                         // back-to-front: deepest zone first
+  zones.forEach((z, i) => z.n = i + 1);
+  const laneSafe = pieces(clip(lane.poly, S.safe.filter(p => area(p) > 0), CT().ctIntersection));
+  const laneDeg = Math.atan2(F.n[1], F.n[0]) * 180 / Math.PI;
+  // grids, one per truck type
+  const grids = {};
+  for (const t of S.fleet) {
+    const r = calc(t).r, gap = +(S.gap[t.id] ?? 0), d = 2 * r + gap;
+    const placed = [];
+    const freeOf = (p, pts) => [...placed, ...pts].every(q => Math.hypot(q[0] - p[0], q[1] - p[1]) >= d - 1e-6);
+    const insideArea = p => pointInPoly(p, S.poly) && distToEdges(p, S.poly) >= r - 1e-6;
+    const clearOfLane = p => lane.poly.every(L => !pointInPoly(p, L) && distToEdges(p, L) >= r - 1e-6);
+    const spots = [];
+    for (const z of zones) {
+      const pts = hexIn(z.poly, S.sweep, r, gap, (p, pts) => insideArea(p) && clearOfLane(p) && freeOf(p, pts));
+      pts.sort((p, q) => depthOf(q, F) - depthOf(p, F));            // deepest first inside the zone
+      for (const p of pts) { placed.push(p); spots.push({ p, zone: z.n, lane: false, depth: depthOf(p, F) }); }
+    }
+    // lane spots (filled last, deepest first)
+    const lanePts = [];
+    for (const L of laneSafe) for (const p of hexIn(L, laneDeg, r, gap, (p, pts) => insideArea(p) && freeOf(p, pts))) { placed.push(p); lanePts.push({ p, zone: 0, lane: true, depth: depthOf(p, F) }); }
+    lanePts.sort((p, q) => q.depth - p.depth);
+    // fill order: zone spots in zone order; a lane spot goes right after the last zone spot that is deeper than it
+    const seq = spots.slice(); let last = -1;
+    for (const L of lanePts) {
+      let pos = -1; seq.forEach((s, i) => { if (!s.lane && s.depth >= L.depth) pos = i; });
+      pos = Math.max(pos, last); seq.splice(pos + 1, 0, L); last = pos + 1;
+    }
+    seq.forEach((s, i) => s.order = i + 1);
+    // coverage = area of the union of pile circles / area
+    const circles = seq.map(s => Array.from({ length: 32 }, (_, k) => [s.p[0] + r * Math.cos(k * Math.PI / 16), s.p[1] + r * Math.sin(k * Math.PI / 16)]));
+    const covA = circles.length ? sumArea(clip(clip(circles, [], CT().ctUnion), [S.poly], CT().ctIntersection)) : 0;
+    grids[t.id] = { r, gap, spots: seq, nZone: spots.length, nLane: lanePts.length, cov: covA / Math.abs(area(S.poly)) * 100, covSafe: covA / Math.max(1e-9, sumArea(S.safe)) * 100 };
+  }
+  S.r4 = { lane, zones, region, grids, laneSafe };
+  if (S.view4 == null || !S.fleet.some(t => t.id === S.view4)) S.view4 = S.fleet[0].id;
+  render4(); draw();
+}
+const centroidOf = p => { let cx = 0, cy = 0, a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length], k = x1 * y2 - x2 * y1; cx += (x1 + x2) * k; cy += (y1 + y2) * k; a += k; } return [cx / (3 * a), cy / (3 * a)]; };
+
+function render4() {
+  const R = S.r4; if (!R) return;
+  $("sweep").value = S.sweep; $("sweepVal").textContent = S.sweep + "°";
+  $("stats4z").innerHTML = `<div>Zones</div><div><b>${R.zones.length}</b></div><div>Fill order</div><div>Z1 (deepest) → Z${R.zones.length} (nearest entry) → lane</div>`;
+  $("gridTable").innerHTML = `<tr><td class="n"></td><td class="u">r m</td><td class="u">spacing m</td><td class="u">piles</td><td class="u">cover %</td></tr>` +
+    S.fleet.map(t => { const G = R.grids[t.id]; return `<tr class="${t.id === S.view4 ? "sel" : ""}" data-id="${t.id}" style="cursor:pointer">
+      <td class="n">${t.name}</td><td>${f(G.r)}</td>
+      <td><input type="number" step="0.1" data-id="${t.id}" value="${S.gap[t.id] ?? 0}" min="${f(-G.r, 1)}" style="width:62px"></td>
+      <td>${G.nZone}${G.nLane ? ` + ${G.nLane}` : ""}</td><td title="of dump area / of safe zone">${f(G.cov, 1)} / ${f(G.covSafe, 1)}</td></tr>`; }).join("") +
+    `<tr><td colspan="5" class="u" style="font-size:11px">piles = zone spots + lane spots · cover = % of dump area / % of safe zone · click a row to view its grid</td></tr>`;
+  $("gridTable").querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = e => { if (e.target.tagName === "INPUT") return; S.view4 = +tr.dataset.id; render4(); draw(); });
+  $("gridTable").querySelectorAll("input").forEach(el => el.onchange = () => { S.gap[+el.dataset.id] = +el.value || 0; saveSession(); run4(); });
+  const G = R.grids[S.view4];
+  $("stats4l").innerHTML = `<div>Lane width</div><div>2 × ${f(R.lane.w, 1)} m</div><div>Lane length</div><div>${f(R.lane.depthMax, 1)} m</div>
+    <div>Lane spots (${S.fleet.find(t => t.id === S.view4).name})</div><div>${G.nLane}</div>`;
+  banner(`${R.zones.length} zone(s) at ${S.sweep}° · ${G.spots.length} piles for ${S.fleet.find(t => t.id === S.view4).name}`);
+}
+
+const ZONE_COLORS = ["#6cb6ff", "#b083f0", "#3fb68b", "#e0823d", "#e5534b", "#d6c14a", "#4fc1c9", "#e06cb0"];
+function draw4() {
+  const R = S.r4; if (!R) return;
+  // safe zone outline
+  ctx.setLineDash([6, 4]); ctx.strokeStyle = "#3fb68b"; ctx.lineWidth = 1.5;
+  for (const q of S.safe) { pathOf(q); ctx.stroke(); } ctx.setLineDash([]);
+  // zones
+  R.zones.forEach((z, i) => { const col = ZONE_COLORS[i % ZONE_COLORS.length]; pathOf(z.poly); ctx.fillStyle = col + "22"; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke(); });
+  // lane with in/out arrows
+  for (const L of R.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.13)"; ctx.fill(); ctx.strokeStyle = "rgba(245,166,35,.7)"; ctx.setLineDash([8, 5]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); }
+  const arrow = (line, col, txt) => { const [X0, Y0] = W2S(line[0]), [X1, Y1] = W2S(line[1]); ctx.strokeStyle = ctx.fillStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.stroke(); const an = Math.atan2(Y1 - Y0, X1 - X0);
+    ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X1 - 10 * Math.cos(an - .4), Y1 - 10 * Math.sin(an - .4)); ctx.lineTo(X1 - 10 * Math.cos(an + .4), Y1 - 10 * Math.sin(an + .4)); ctx.fill();
+    ctx.font = "bold 11px system-ui"; ctx.fillText(txt, (X0 + X1) / 2 + 6, (Y0 + Y1) / 2); };
+  arrow(R.lane.inLine, "#3fb68b", "IN"); arrow(R.lane.outLine, "#e5534b", "OUT");
+  // piles of the selected truck type
+  const G = R.grids[S.view4], rp = G.r * view.s, nums = $("showNums").checked && rp > 8;
+  for (const s of G.spots) {
+    const [X, Y] = W2S(s.p); ctx.beginPath(); ctx.arc(X, Y, rp, 0, Math.PI * 2);
+    ctx.fillStyle = s.lane ? "rgba(245,166,35,.35)" : "rgba(201,164,107,.45)"; ctx.fill(); ctx.strokeStyle = s.lane ? "#f5a623" : "#c9a46b"; ctx.lineWidth = 1; ctx.stroke();
+    if (nums) { ctx.fillStyle = "#e6edf3"; ctx.font = `${Math.min(12, rp * 0.9) | 0}px system-ui`; ctx.textAlign = "center"; ctx.fillText(s.order, X, Y + 4); ctx.textAlign = "left"; }
+    else { ctx.fillStyle = "#e6edf3"; ctx.beginPath(); ctx.arc(X, Y, 1.5, 0, 7); ctx.fill(); }
+  }
+  // zone labels on top
+  R.zones.forEach((z, i) => { const [X, Y] = W2S(centroidOf(z.poly)); label("Z" + z.n, X, Y, ZONE_COLORS[i % ZONE_COLORS.length], "#0f1419"); });
+}
+
+$("sweep").oninput = () => { S.sweep = +$("sweep").value; $("sweepVal").textContent = S.sweep + "°"; };
+$("sweep").onchange = () => { S.sweep = +$("sweep").value; saveSession(); run4(); };
+$("bestAngle").onclick = () => { S.sweep = null; run4(); saveSession(); };
+$("showNums").onchange = draw;
+$("laneW").onchange = () => { const v = parseFloat($("laneW").value); S.laneW = v > 0 ? v : null; saveSession(); render2(); };
+$("toR4").onclick = () => setRound(4);
+
+// =====================================================================================
+// ROUND 5 — Step 4 (dispatcher) + Step 5 (safety rules), live simulation
+// =====================================================================================
+const TYPE_COLORS = ["#c9a46b", "#6cb6ff", "#b083f0", "#3fb68b", "#e0823d", "#e06cb0"];
+const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, headway: 12, maxIn: null, seed: 7, method: "touch" };
+S.simCfg = Object.assign({}, SIM_DEFAULTS);
+
+function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function offsetPaths(paths, delta) {
+  const co = new ClipperLib.ClipperOffset(2, 0.05 * K), out = new ClipperLib.Paths();
+  co.AddPaths(paths.map(toC), ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon); co.Execute(out, delta * K);
+  return out.map(fromC);
+}
+const segDist = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1))); return Math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1]); };
+const inPolys = (c, polys, tol = 1e-3) => polys.some(p => pointInPoly(c, p) || distToEdges(c, p) < tol);
+
+// spatial hash for piles
+function PileHash(cell) { this.c = cell; this.m = new Map(); }
+PileHash.prototype.key = function (x, y) { return Math.floor(x / this.c) + "," + Math.floor(y / this.c); };
+PileHash.prototype.add = function (q) { const k = this.key(q.p[0], q.p[1]); (this.m.get(k) || this.m.set(k, []).get(k)).push(q); };
+PileHash.prototype.near = function (p, R) {
+  const out = [], n = Math.ceil(R / this.c), cx = Math.floor(p[0] / this.c), cy = Math.floor(p[1] / this.c);
+  for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) { const a = this.m.get((cx + i) + "," + (cy + j)); if (a) out.push(...a); }
+  return out;
+};
+
+// ---------------------------------------------------------------- simulation world
+function newSim(method, cfg) {
+  const R = S.r4, F = R.lane.F, lane = R.lane;
+  const types = S.fleet.map((t, k) => ({ id: t.id, name: t.name, r: calc(t).r, L: +t.L, W: +t.W, share: shares()[k], gap: +(S.gap[t.id] ?? 0), color: TYPE_COLORS[k % TYPE_COLORS.length] }));
+  const rmax = Math.max(...types.map(t => t.r)), gmax = Math.max(0, ...types.map(t => Math.abs(t.gap))), Wmax = Math.max(...types.map(t => t.W));
+  const smallest = types.reduce((a, b) => a.r <= b.r ? a : b);
+  const W = {
+    method, cfg, R, F, lane, types, rmax, gmax, Wmax, smallest,
+    t: 0, piles: [], hash: new PileHash(2 * rmax + gmax + 1), trucks: [], queue: [], nextArrival: 0, lastRelease: -1e9,
+    locked: new Map(), full: new Set(), done: false, rand: rng(cfg.seed), tid: 0,
+    stats: { collisions: 0, deadlocks: 0, skipped: 0, turnedAway: 0, maxWait: 0, waitSum: 0, released: 0 }, pairs: new Set(),
+    regionCache: new Map(), stuckFor: 0, fillTime: null, version: 0, failVer: null, minLaneDepth: Infinity, resv: new Map(), mutex: null,
+  };
+  W.maxIn = cfg.maxIn > 0 ? cfg.maxIn : Math.max(1, R.zones.length);
+  buildRouteGrid(W);
+  if (method === "grid") W.baseSpots = R.grids[smallest.id].spots.map(s => ({ c: s.p, kind: s.lane ? "lane" : "zone", order: s.order }));
+  if (method === "base") W.baseSpots = fixedSpots(W);
+  return W;
+}
+const laneP = (W, d) => { const F = W.F, dd = Math.max(0, Math.min(d, W.lane.depthMax)); return [F.E[0] + F.n[0] * dd, F.E[1] + F.n[1] * dd]; };
+const latOf = (W, c) => (c[0] - W.F.E[0]) * W.F.t[0] + (c[1] - W.F.E[1]) * W.F.t[1];
+const gapOf = (W, a, b) => (a.gap + b.gap) / 2;
+
+// centre regions for a pile of radius r: zone spots (safe zone minus lane, circle inside area and clear of lane), lane spots
+function regions(W, r) {
+  const key = r.toFixed(3); if (W.regionCache.has(key)) return W.regionCache.get(key);
+  const inner = pieces(offsetPaths([S.poly], -r)), laneBuf = offsetPaths(W.lane.poly, r);
+  const zoneR = pieces(clip(clip(W.R.region, inner, CT().ctIntersection), laneBuf, CT().ctDifference));
+  const laneR = pieces(clip(W.R.laneSafe, inner, CT().ctIntersection));
+  const v = { zoneR, laneR }; W.regionCache.set(key, v); return v;
+}
+function zoneOf(W, c) {
+  let best = null, bd = Infinity;
+  for (const z of W.R.zones) { if (pointInPoly(c, z.poly)) return z.n; const d = distToEdges(c, z.poly); if (d < bd) { bd = d; best = z.n; } }
+  return best;
+}
+
+// baseline (current practice): fixed square grid of spot points, spacing = largest pile + 7.38 m gap
+function fixedSpots(W) {
+  const s = 2 * W.rmax + 7.38, reg = regions(W, W.rmax), out = [], b = bounds(S.poly);
+  for (let x = b[0] + s / 2; x < b[2]; x += s) for (let y = b[1] + s / 2; y < b[3]; y += s) {
+    const c = [x, y]; if (inPolys(c, reg.zoneR, 0)) out.push({ c, kind: "zone" }); else if (inPolys(c, reg.laneR, 0)) out.push({ c, kind: "lane" });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- routing grid (truck centre positions)
+// free cell = truck fits (centre ≥ W/2 from the area edge) and not on a pile. IN routes may not use the OUT half
+// of the lane and vice versa (one-way lanes, Rule 1).
+function buildRouteGrid(W) {
+  const b = bounds(S.poly), cs = Math.max(0.5, Math.min(...W.types.map(t => t.W)) / 2), half = W.Wmax / 2;
+  const nx = Math.ceil((b[2] - b[0]) / cs) + 1, ny = Math.ceil((b[3] - b[1]) / cs) + 1;
+  const G = { cs, nx, ny, x0: b[0], y0: b[1], base: new Uint8Array(nx * ny), side: new Int8Array(nx * ny), depth: new Float32Array(nx * ny) };
+  const inLane = W.lane.poly;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const c = [b[0] + i * cs, b[1] + j * cs], k = j * nx + i;
+    const laneCell = inLane.some(L => pointInPoly(c, L));
+    // lane cells count right up to the entry edge (trucks drive in there); elsewhere the truck must fit inside the area
+    if (!pointInPoly(c, S.poly) || (!laneCell && distToEdges(c, S.poly) < half * 0.9)) continue;
+    G.base[k] = 1; G.depth[k] = depthOf(c, W.F);
+    if (laneCell) G.side[k] = latOf(W, c) < 0 ? -1 : 1;   // -1 = IN lane half, +1 = OUT half
+  }
+  // ov = which lane halves a truck BODY would overlap at this cell: bit 1 = IN half, bit 2 = OUT half
+  const F = W.F, w = W.lane.w, far = 1e4, P = (u, v) => [F.E[0] + F.t[0] * u + F.n[0] * v, F.E[1] + F.t[1] * u + F.n[1] * v];
+  const inHalf = pieces(clip(inLane, [[P(-far, -far), P(0, -far), P(0, far), P(-far, far)]], CT().ctIntersection));
+  const outHalf = pieces(clip(inLane, [[P(0, -far), P(far, -far), P(far, far), P(0, far)]], CT().ctIntersection));
+  const touches = (c, polys) => polys.some(L => pointInPoly(c, L) || distToEdges(c, L) < half);
+  G.ov = new Uint8Array(nx * ny);
+  for (let k = 0; k < nx * ny; k++) { if (!G.base[k]) continue; const c = cellXY(G, k); G.ov[k] = (touches(c, inHalf) ? 1 : 0) | (touches(c, outHalf) ? 2 : 0); }
+  G.band = G.side;
+  G.need = new Uint8Array(nx * ny);
+  for (let k = 0; k < nx * ny; k++) { if (!G.base[k]) continue; if (G.side[k]) { G.need[k] = 1; continue; }
+    const c = cellXY(G, k); if (inLane.some(L => distToEdges(c, L) < half + 0.75 * cs + 0.5)) G.need[k] = 1; }
+  // lane centre lines: the only cells where a truck may drive ALONG a lane (body stays inside its own half)
+  G.core = new Int8Array(nx * ny);
+  for (let k = 0; k < nx * ny; k++) if (G.side[k]) { const lat = latOf(W, cellXY(G, k)); if (Math.abs(lat - G.side[k] * w / 2) <= cs * 0.75) G.core[k] = G.side[k]; }
+  // gate cells: lane cells closest to the entry
+  G.inStart = []; G.outEnd = [];
+  for (let k = 0; k < nx * ny; k++) if (G.base[k] && G.side[k] && G.depth[k] < cs * 2.5 && G.core[k]) (G.side[k] < 0 ? G.inStart : G.outEnd).push(k);
+  W.G = G; refreshReach(W);
+}
+const cellXY = (G, k) => [G.x0 + (k % G.nx) * G.cs, G.y0 + Math.floor(k / G.nx) * G.cs];
+const cellAt = (G, p) => { const i = Math.round((p[0] - G.x0) / G.cs), j = Math.round((p[1] - G.y0) / G.cs); return i < 0 || j < 0 || i >= G.nx || j >= G.ny ? -1 : j * G.nx + i; };
+function blockedByPile(W, c) { const half = W.Wmax / 2; return W.hash.near(c, W.rmax + half + W.G.cs).some(q => Math.hypot(q.p[0] - c[0], q.p[1] - c[1]) < q.r + half * 0.85); }
+function footprint(W, c, r) {   // cells a pile of radius r at c takes away from trucks
+  const G = W.G, R = r + W.Wmax / 2 * 0.85, n = Math.ceil(R / G.cs) + 1, ci = Math.round((c[0] - G.x0) / G.cs), cj = Math.round((c[1] - G.y0) / G.cs), out = [];
+  for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i, p = cellXY(G, k); if (Math.hypot(p[0] - c[0], p[1] - c[1]) < R) out.push(k); }
+  return out;
+}
+function blockAround(W, q) {   // a new pile blocks the cells a truck centre can no longer use
+  const G = W.G, R = q.r + W.Wmax / 2 * 0.85, n = Math.ceil(R / G.cs) + 1, ci = Math.round((q.p[0] - G.x0) / G.cs), cj = Math.round((q.p[1] - G.y0) / G.cs);
+  for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) {
+    if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i, c = cellXY(G, k);
+    if (Math.hypot(c[0] - q.p[0], c[1] - q.p[1]) < R) G.free[k] = 0; }
+}
+function refreshReach(W) {
+  const G = W.G, N = G.nx * G.ny;
+  if (!G.free) { G.free = new Uint8Array(N); for (let k = 0; k < N; k++) if (G.base[k] && !blockedByPile(W, cellXY(G, k))) G.free[k] = 1; }
+  // Rule 1: inside the other direction's lane a truck may only CROSS it (move sideways), never drive along it
+  // along a lane only on cells where the body stays inside its own half; cells reaching over the divider (or in the
+  // other half) may only be crossed sideways
+  const nn = W.F.n, lateral = (k, n2) => Math.abs(((n2 % G.nx) - (k % G.nx)) * nn[0] + (((n2 / G.nx) | 0) - ((k / G.nx) | 0)) * nn[1]) < 0.5;
+  const cross = (k, n2, other) => {
+    if (G.side[n2] && !G.core[n2]) return lateral(k, n2);          // off the centre line: sideways only
+    if (G.side[n2] === other) return lateral(k, n2);                // the other lane: cross it, never drive along it
+    return true; };
+  G.mvIn = (k, n2) => cross(k, n2, 1); G.mvOut = (k, n2) => cross(k, n2, -1);
+  G.distIn = bfs(G, G.inStart, k => G.free[k], G.mvIn);
+  G.distOut = bfs(G, G.outEnd, k => G.free[k], G.mvOut);
+}
+function bfs(G, starts, ok, okMove = () => true) {
+  const d = new Int32Array(G.nx * G.ny).fill(-1), q = []; for (const s of starts) if (ok(s)) { d[s] = 0; q.push(s); }
+  for (let h = 0; h < q.length; h++) { const k = q[h], i = k % G.nx, j = (k / G.nx) | 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { if (!di && !dj) continue; const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= G.nx || jj >= G.ny) continue;
+      const n = jj * G.nx + ii; if (d[n] < 0 && ok(n) && okMove(k, n)) { d[n] = d[k] + 1; q.push(n); } } }
+  return d;
+}
+// follow decreasing distance from a cell back to the start set -> list of points
+function trace(G, dist, k) { return traceWith(G, dist, dist === G.distIn ? G.mvIn : G.mvOut, k); }
+function traceWith(G, dist, mv, k) { const out = [cellXY(G, k)]; let cur = k, guard = 0;
+  while (dist[cur] > 0 && guard++ < 1e5) { const i = cur % G.nx, j = (cur / G.nx) | 0; let best = cur;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= G.nx || jj >= G.ny) continue;
+      const n = jj * G.nx + ii; if (dist[n] >= 0 && dist[n] === dist[cur] - 1 && mv(n, cur) && (best === cur || Math.abs(di) + Math.abs(dj) === 1)) best = n; }
+    if (best === cur) break; cur = best; out.push(cellXY(G, cur)); }
+  return out; }
+// stop cell for a pile at c: a free cell next to the pile, reachable going in and coming out
+function stopCell(W, c, r, Wt, zoneSpot = true) {
+  const G = W.G, R = r + Wt / 2, n = Math.ceil((R + 2 * G.cs) / G.cs), ci = Math.round((c[0] - G.x0) / G.cs), cj = Math.round((c[1] - G.y0) / G.cs);
+  let best = -1, bs = Infinity;
+  for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) {
+    if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i;
+    if (G.distIn[k] < 0 || G.distOut[k] < 0 || (zoneSpot && G.need[k])) continue;
+    const d = Math.hypot(G.x0 + i * G.cs - c[0], G.y0 + j * G.cs - c[1]); if (d < R || d > R + 1.6 * G.cs) continue;
+    const s = d + G.distIn[k] * 0.01; if (s < bs) { bs = s; best = k; }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------- the dispatcher
+function checkSpot(W, ty, c, kind, pre = false) {
+  const r = ty.r, reg = regions(W, r);
+  for (const q of W.hash.near(c, r + W.rmax + W.gmax)) if (Math.hypot(q.p[0] - c[0], q.p[1] - c[1]) < r + q.r + gapOf(W, ty, q.ty) - 1e-3) return "overlap";
+  if (!pre && !inPolys(c, kind === "zone" ? reg.zoneR : reg.laneR)) return "region";
+  const z = kind === "lane" ? "L" : zoneOf(W, c);
+  if (W.locked.has(z)) return "locked";                                                    // Rule 2: zone locking
+  const dep = depthOf(c, W.F);
+  if (kind === "zone") { if (W.minLaneDepth <= dep + r) return "lane"; }
+  else {
+    if (W.trucks.length) return "busy";                                                   // last phase: lane spots one truck at a time
+    if (deepestZone(W) > dep) return "zone deeper";
+  }
+  const sc = stopCell(W, c, r, W.Wmax, kind === "zone"); if (sc < 0) return "unreachable";
+  return { zone: z, stop: sc };
+}
+// cells (outside the lanes) a truck body passes over along a path
+function routeCells(W, path) {
+  const G = W.G, n = Math.ceil(W.Wmax / 2 / G.cs), out = new Set();
+  for (const p of path) { const k = cellAt(G, p); if (k < 0 || G.side[k]) continue;    // driving along a lane is covered by Rule 1 + give-way
+    const ci = k % G.nx, cj = (k / G.nx) | 0;
+    for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const q = j * G.nx + i; if (G.base[q] && !G.side[q]) out.add(q); } }
+  return out;
+}
+function densify(path, step) {
+  const out = [path[0]];
+  for (let i = 1; i < path.length; i++) { const a = path[i - 1], b = path[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(d / step));
+    for (let k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); }
+  return out;
+}
+function deepestZone(W) {
+  const key = W.version + "|" + W.piles.length; if (W._dz && W._dz.key === key) return W._dz.v;
+  const o = findSpot(W, W.smallest, { kind: "zone", quick: true }); W._dz = { key, v: o ? o.depth : -Infinity }; return W._dz.v;
+}
+function candidates(W, ty, opts) {
+  W.cc ??= new Map();
+  let C = W.cc.get(ty.id);
+  if (!C) {
+    let list;
+    if (W.method === "touch") list = touchStatic(W, ty);
+    else { const reg = regions(W, ty.r); list = W.baseSpots.filter(s => inPolys(s.c, s.kind === "zone" ? reg.zoneR : reg.laneR)).map(s => ({ c: s.c, kind: s.kind, order: s.order })); }
+    list.forEach(o => { o.depth = depthOf(o.c, W.F); o.lat = Math.abs(latOf(W, o.c)); });
+    C = { list, n: 0, dirty: true }; W.cc.set(ty.id, C);
+  }
+  if (C.n < W.piles.length) {                                   // piles never move: update only around the new ones
+    const fresh = W.piles.slice(C.n); C.n = W.piles.length;
+    C.list = C.list.filter(o => fresh.every(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) >= ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3));
+    if (W.method === "touch") { const add = touchAround(W, ty, fresh); add.forEach(o => { o.depth = depthOf(o.c, W.F); o.lat = Math.abs(latOf(W, o.c)); }); C.list.push(...add); C.dirty = true; }
+  }
+  if (C.dirty) {
+    if (W.method === "grid") C.list.sort((a, b) => a.order - b.order);
+    else { const q = ty.r * 0.1; C.list.sort((a, b) => Math.round(b.depth / q) - Math.round(a.depth / q) || b.lat - a.lat); }   // deepest first, then farthest from the lane
+    C.dirty = false;
+  }
+  let list = C.list;
+  if (opts.kind) list = list.filter(o => o.kind === opts.kind);
+  if (opts.minDepth != null) list = list.filter(o => o.depth > opts.minDepth + 1e-6);
+  return list;
+}
+function findSpot(W, ty, opts = {}) {
+  let busy = 0;
+  for (const o of candidates(W, ty, opts)) {
+    if (opts.quick) { // used by the lane rule: is there still any free, reachable zone spot deeper?
+      if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
+      if (stopCell(W, o.c, ty.r, W.Wmax) < 0) continue;
+      return o;
+    }
+    const res = checkSpot(W, ty, o.c, o.kind, true);
+    if (typeof res === "object") {
+      // route lock (extends Rule 2): the truck's route outside the lanes must not cross a route reserved by another truck
+      // isolation check (Step 4): the new pile must not land on another truck's reserved route,
+      // and this truck must still have a way out once its own pile is down
+      const foot = footprint(W, o.c, ty.r);
+      if (foot.some(k => W.resv.has(k)) || W.resv.has(res.stop)) continue;            // cheap rejections: no route search needed
+      if (++busy > 30) return null;                                                    // limit the expensive route searches
+      const pin = densify(routeIn(W, res.stop), W.G.cs);
+      const saved = foot.map(k => W.G.free[k]); foot.forEach(k => W.G.free[k] = 0);
+      const ro = routeOut(W, res.stop);
+      foot.forEach((k, i) => W.G.free[k] = saved[i]);
+      if (!ro) { W.stats.skipped++; continue; }
+      const pout = densify(ro.path.slice(0, ro.laneIdx + 1), W.G.cs);
+      const cells = routeCells(W, [...pin, ...pout]);
+      if ([...cells].some(k => W.resv.has(k))) continue;
+      return Object.assign(o, res, { pin, cells, ro });
+    }
+    if (res === "unreachable") W.stats.skipped++;
+  }
+  return null;
+}
+// touching placement: every point where a new circle (radius r) touches two piles, a pile and an edge, or two edges
+function touchStatic(W, ty) {
+  const reg = regions(W, ty.r), out = [];
+  for (const p of reg.zoneR) for (const v of p) out.push({ c: v, kind: "zone" });
+  for (const p of reg.laneR) for (const v of p) out.push({ c: v, kind: "lane" });
+  return out;
+}
+function touchAround(W, ty, fresh) {
+  const r = ty.r, reg = regions(W, r), out = [];
+  const polys = [...reg.zoneR.map(p => ({ p, kind: "zone" })), ...reg.laneR.map(p => ({ p, kind: "lane" }))];
+  const kindAt = c => inPolys(c, reg.zoneR) ? "zone" : inPolys(c, reg.laneR) ? "lane" : null;
+  for (const A of fresh) {
+    const RA = r + A.r + gapOf(W, ty, A.ty);
+    for (const B of W.hash.near(A.p, RA + r + W.rmax + W.gmax)) {
+      if (B.id >= A.id) continue; const RB = r + B.r + gapOf(W, ty, B.ty);
+      const dx = B.p[0] - A.p[0], dy = B.p[1] - A.p[1], d = Math.hypot(dx, dy); if (d > RA + RB || d < Math.abs(RA - RB) || d < 1e-9) continue;
+      const l = (RA * RA - RB * RB + d * d) / (2 * d), h = Math.sqrt(Math.max(0, RA * RA - l * l)), mx = A.p[0] + dx * l / d, my = A.p[1] + dy * l / d;
+      for (const s of [1, -1]) { const c = [mx - s * dy * h / d, my + s * dx * h / d], k = kindAt(c); if (k) out.push({ c, kind: k }); }
+    }
+    for (const { p, kind } of polys) for (let i = 0; i < p.length; i++) {
+      const e0 = p[i], e1 = p[(i + 1) % p.length];
+      if (segDist(A.p, e0, e1) > RA) continue;
+      const dx = e1[0] - e0[0], dy = e1[1] - e0[1], fx = e0[0] - A.p[0], fy = e0[1] - A.p[1];
+      const qa = dx * dx + dy * dy, qb = 2 * (fx * dx + fy * dy), qc = fx * fx + fy * fy - RA * RA, disc = qb * qb - 4 * qa * qc; if (disc < 0) continue;
+      for (const s of [-1, 1]) { const t = (-qb + s * Math.sqrt(disc)) / (2 * qa); if (t >= 0 && t <= 1) out.push({ c: [e0[0] + t * dx, e0[1] + t * dy], kind }); }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- trucks
+function release(W, ty) {
+  const o = findSpot(W, ty);
+  if (!o) return null;
+  const pile = { id: W.piles.length, p: o.c, r: ty.r, ty, kind: o.kind, depth: o.depth, state: "reserved", zone: o.zone };
+  W.piles.push(pile); W.hash.add(pile); W.locked.set(o.zone, true); blockAround(W, pile);
+  if (pile.kind === "lane") W.minLaneDepth = Math.min(W.minLaneDepth, pile.depth);
+  const tr = { id: ++W.tid, ty, spot: pile, phase: "in", wait: 0, stop: o.stop, born: W.t };
+  W.version++; refreshReach(W);
+  tr.path = o.pin; tr.cells = o.cells; tr.ro = o.ro; for (const k of o.cells) W.resv.set(k, tr.id);
+  tr.pos = tr.path[0].slice(); tr.wp = 1; tr.heading = Math.atan2(W.F.n[1], W.F.n[0]);
+  W.trucks.push(tr); return tr;
+}
+// lane centre point of the IN (-1) or OUT (+1) lane at depth d
+function laneAt(W, side, d) { const F = W.F, w = W.lane.w, dd = Math.max(0, Math.min(d, W.lane.depthMax - W.G.cs));
+  return [F.E[0] + F.t[0] * side * w / 2 + F.n[0] * dd, F.E[1] + F.t[1] * side * w / 2 + F.n[1] * dd]; }
+function nearestFree(W, p, side) { const G = W.G; let best = -1, bd = Infinity;
+  const n = Math.ceil(W.lane.w / G.cs) + 2, ci = Math.round((p[0] - G.x0) / G.cs), cj = Math.round((p[1] - G.y0) / G.cs);
+  for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) {
+    if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i;
+    if (!G.free[k] || (side && G.core[k] !== side)) continue; const c = cellXY(G, k), d = Math.hypot(c[0] - p[0], c[1] - p[1]); if (d < bd) { bd = d; best = k; } }
+  return best; }
+// IN: gate -> along the IN lane to the spot's depth -> turn in to the stop cell
+function routeIn(W, stop) {
+  const G = W.G, d = depthOf(cellXY(G, stop), W.F), gate = laneAt(W, -1, 0).map((v, i) => v - W.F.n[i] * 25);
+  for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
+    const k0 = nearestFree(W, laneAt(W, -1, dd), -1); if (k0 < 0) continue;
+    const dist = bfs(G, [k0], k => G.free[k], G.mvIn); if (dist[stop] < 0) continue;
+    const tail = traceWith(G, dist, G.mvIn, stop).reverse();
+    return [gate, ...lanePath(W, -1, k0), ...tail.slice(1)];
+  }
+  return [gate, ...trace(G, G.distIn, stop).reverse()];
+}
+// path inside one lane half, from the entry end to cell k (follows the lane even where the shape cuts into it)
+function lanePath(W, side, k) {
+  const G = W.G, starts = side < 0 ? G.inStart : G.outEnd;
+  const own = side < 0 ? 1 : 2;
+  const dist = bfs(G, starts.filter(q => G.core[q] === side), q => (G.core[q] === side || q === k) && (G.free[q] || q === k));
+  if (dist[k] < 0) return [laneAt(W, side, 0), cellXY(G, k)];
+  return traceWith(G, dist, () => true, k).reverse();
+}
+// OUT: stop -> to the OUT lane at the same depth -> along the OUT lane to the exit
+function routeOut(W, from) {
+  const G = W.G, d = depthOf(cellXY(G, from), W.F), exit = laneAt(W, 1, 0).map((v, i) => v - W.F.n[i] * 25);
+  const dist = bfs(G, [from], k => G.free[k] || k === from, G.mvOut);   // the truck's own cell is always usable
+  for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
+    const k1 = nearestFree(W, laneAt(W, 1, dd), 1); if (k1 < 0 || dist[k1] < 0) continue;
+    const head = traceWith(G, dist, G.mvOut, k1).reverse();
+    return { path: [...head, ...lanePath(W, 1, k1).reverse().slice(1), exit], laneIdx: head.length - 1 };
+  }
+  return null;                                                           // no way out right now: wait and retry
+}
+function stepSim(W, dt) {
+  const cfg = W.cfg, v = cfg.kmh / 3.6;
+  // arrivals (random mix by share)
+  while (W.t >= W.nextArrival && !W.allFull) {
+    const live = W.types.filter(t => !W.full.has(t.id));
+    let x = W.rand() * live.reduce((s, t) => s + t.share, 0), ty = live[0];
+    for (const t of live) { x -= t.share; if (x <= 0) { ty = t; break; } }
+    W.queue.push({ ty, at: W.nextArrival });
+    W.nextArrival += cfg.every * (0.7 + 0.6 * W.rand());
+  }
+  // gate (Rule 3): enter only if fewer than maxIn inside, with a headway
+  if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway && W.failVer !== W.version + ":" + W.queue[0].ty.id) {
+    const q = W.queue[0], tr = release(W, q.ty);
+    if (!tr) W.failVer = W.version + ":" + q.ty.id;
+    if (tr) { W.queue.shift(); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); }
+    else if (!W.trucks.length) {                                   // nothing inside and still no spot: this truck size cannot fit any more
+      W.full.add(q.ty.id); W.queue = W.queue.filter(z => { if (z.ty.id === q.ty.id) { W.stats.turnedAway++; return false; } return true; });
+      if (W.full.size === W.types.length) { W.allFull = true; W.queue = []; }
+    }
+  }
+  // move trucks
+  let moved = false;
+  for (const tr of W.trucks) {
+    if (tr.phase === "man" || tr.phase === "dump") {
+      tr.wait -= dt; moved = true;
+      if (tr.wait > 0) continue;
+      if (tr.phase === "man") { tr.phase = "dump"; tr.wait = cfg.tDump; continue; }
+      if (tr.spot.state !== "placed") { tr.spot.state = "placed"; W.version++; refreshReach(W); }
+      const ro = tr.ro || routeOut(W, tr.stop);     // the out-route checked and reserved at dispatch (no other pile can land on it)
+      if (!ro) { tr.wait = 10; tr.blocked = (tr.blocked || 0) + 10; continue; }   // trapped for now (counted by the deadlock check)
+      tr.phase = "out"; tr.path = densify(ro.path.slice(0, ro.laneIdx + 1), W.G.cs); tr.unlockAt = tr.path.length - 1;
+      tr.path.push(...densify([ro.path[ro.laneIdx], ...ro.path.slice(ro.laneIdx + 1)], W.G.cs).slice(1)); tr.wp = 0;
+      continue;
+    }
+    if (tr.wp >= tr.path.length) {
+      if (tr.phase === "in") { tr.phase = "man"; tr.wait = cfg.tMan; continue; }
+      tr.phase = "gone"; continue;
+    }
+    // car following: wait if another truck is just ahead
+    const tgt = tr.path[tr.wp], hd = Math.atan2(tgt[1] - tr.pos[1], tgt[0] - tr.pos[0]);
+    const block = W.trucks.find(o => o !== tr && o.phase !== "gone" && inMyWay(tr, o));
+    if (block && !(block.id > tr.id && inMyWay(block, tr))) { tr.blocked = (tr.blocked || 0) + dt; continue; }   // mutual: the older truck goes first
+    // ---- lane rules as 1-D stretches along each lane (works for lanes at any angle) ----
+    if (!laneOk(W, tr, tgt)) { tr.blocked = (tr.blocked || 0) + dt; continue; }
+    tr.blocked = 0;
+    let step = v * dt;
+    while (step > 0 && tr.wp < tr.path.length) {
+      const p = tr.path[tr.wp], d = Math.hypot(p[0] - tr.pos[0], p[1] - tr.pos[1]);
+      if (d > 1e-9 && !laneOk(W, tr, p)) break;                     // checked at every cell entered
+      if (d > 1e-9) tr.heading = Math.atan2(p[1] - tr.pos[1], p[0] - tr.pos[0]);
+      if (d <= step) { tr.pos = p.slice(); step -= d; tr.wp++; } else { tr.pos = [tr.pos[0] + (p[0] - tr.pos[0]) * step / d, tr.pos[1] + (p[1] - tr.pos[1]) * step / d]; step = 0; }
+    }
+    releaseLanes(W, tr);
+    if (tr.phase === "out" && tr.zoneOpen !== true && tr.wp > tr.unlockAt) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); tr.zoneOpen = true; W.version++; }   // back in the lane: zone + route free
+    moved = true;
+  }
+  W.trucks = W.trucks.filter(tr => { if (tr.phase === "gone") { if (!tr.zoneOpen) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); } if (W.mutex === tr) W.mutex = null; W.version++; return false; } return true; });
+  // safety measurement: two trucks overlapping = collision (counted once per pair)
+  for (let i = 0; i < W.trucks.length; i++) for (let j = i + 1; j < W.trucks.length; j++) {
+    const a = W.trucks[i], b = W.trucks[j], key = a.id + "-" + b.id;
+    if (Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) < (a.ty.W + b.ty.W) / 2 * 0.8 && depthOf(a.pos, W.F) > 0 && depthOf(b.pos, W.F) > 0) { if (!W.pairs.has(key)) { W.pairs.add(key); W.stats.collisions++; } }
+  }
+  // deadlock: trucks inside but none can move for 10 minutes
+  W.stuckFor = W.trucks.length && W.trucks.every(tr => (tr.blocked || 0) > 0) ? W.stuckFor + dt : 0;
+  if (W.stuckFor > 600) { W.stats.deadlocks++; W.trucks.forEach(tr => tr.blocked = 0); W.stuckFor = 0; W.trucks.sort((a, b) => a.id - b.id)[0].phase = "gone"; }
+  W.t += dt;
+  if (W.allFull && !W.trucks.length && !W.done) { W.done = true; W.fillTime = W.t; }
+}
+// Lane mutex: the lanes plus a safety strip beside them ("need" cells) may hold only one MOVING truck at a time.
+// The holder never waits for anyone (its lane path is empty, its route outside the lanes is reserved),
+// so it always gets through and hands the lanes on: no collision and no circular wait is possible.
+const needAt = (W, p) => { const k = cellAt(W.G, p); return k >= 0 ? W.G.need[k] : 0; };
+function laneOk(W, tr, p) {
+  if (!needAt(W, p)) return true;
+  if (W.mutex && W.mutex !== tr) return false;
+  W.mutex = tr; return true;
+}
+function releaseLanes(W, tr) {
+  if (W.mutex !== tr) return;
+  const next = tr.path[tr.wp];
+  if (!needAt(W, tr.pos) && (!next || !needAt(W, next))) W.mutex = null;
+}
+function freeRoute(W, tr) { for (const k of tr.cells || []) if (W.resv.get(k) === tr.id) W.resv.delete(k); }
+// is truck o on the next stretch of tr's actual route (its length + 4 m ahead)?
+function inMyWay(tr, o) {
+  if (!tr.path || tr.wp >= tr.path.length || tr.phase === "man" || tr.phase === "dump") return false;
+  const look = (tr.ty.L + o.ty.L) / 2 + 4, clear = (tr.ty.W + o.ty.W) / 2 * 0.9;
+  let a = tr.pos, run = 0;
+  for (let i = tr.wp; i < tr.path.length && run < look; i++) {
+    const b = tr.path[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L > 1e-9 && segDist(o.pos, a, b) < clear && Math.hypot(o.pos[0] - a[0], o.pos[1] - a[1]) > 1e-6) {
+      // ignore a truck that is behind us on this segment
+      const along = ((o.pos[0] - a[0]) * (b[0] - a[0]) + (o.pos[1] - a[1]) * (b[1] - a[1])) / L;
+      if (along > 0 || i > tr.wp) return true;
+    }
+    run += L; a = b;
+  }
+  return false;
+}
+function blocksBack(o, tr) { const hd = Math.atan2(o.path[o.wp]?.[1] - o.pos[1], o.path[o.wp]?.[0] - o.pos[0]); const dx = tr.pos[0] - o.pos[0], dy = tr.pos[1] - o.pos[1];
+  return Math.abs(((Math.atan2(dy, dx) - hd + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) < 0.9; }   // mutual block: the older truck (lower id) goes first
+
+function simCoverage(W, placedOnly = true) {
+  const ps = W.piles.filter(q => !placedOnly || q.state === "placed"); if (!ps.length) return 0;
+  const circles = ps.map(q => Array.from({ length: 28 }, (_, k) => [q.p[0] + q.r * Math.cos(k * Math.PI / 14), q.p[1] + q.r * Math.sin(k * Math.PI / 14)]));
+  return sumArea(clip(clip(circles, [], CT().ctUnion), [S.poly], CT().ctIntersection)) / Math.abs(area(S.poly)) * 100;
+}
+function runToEnd(W, limit = 72 * 3600) { while (!W.done && W.t < limit) stepSim(W, 1); return W; }
+function simSummary(W) {
+  const per = W.types.map(t => `${W.piles.filter(q => q.ty.id === t.id && q.state === "placed").length}`);
+  return { piles: W.piles.filter(q => q.state === "placed").length, per, cov: simCoverage(W), hours: (W.fillTime ?? W.t) / 3600, ...W.stats };
+}
+
+// ---------------------------------------------------------------- Round 5 UI
+let SIM = null, simTimer = null, simSpeed = 1;
+const METHOD_NAMES = { base: "Baseline (fixed spots, 7.38 m gap)", grid: "Grid + remove", touch: "Touching placement" };
+function readCfg() { ["kmh", "tMan", "tDump", "every", "maxIn", "seed"].forEach(k => { const v = parseFloat($("c_" + k).value); S.simCfg[k] = k === "maxIn" ? (v > 0 ? v : null) : (v > 0 ? v : SIM_DEFAULTS[k]); }); }
+function resetSim() { stopSim(); readCfg(); SIM = newSim(S.simCfg.method, Object.assign({}, S.simCfg)); render5(); draw(); }
+function stopSim() { if (simTimer) cancelAnimationFrame(simTimer); simTimer = null; $("playBtn").textContent = "▶ Play"; }
+function playSim() {
+  if (!SIM || SIM.done) resetSim();
+  $("playBtn").textContent = "⏸ Pause";
+  let last = performance.now(), acc = 0;
+  const loop = now => {
+    const real = Math.min(0.1, (now - last) / 1000); last = now;
+    acc += real * 60 * simSpeed;                        // 1× = 1 minute of site time per second
+    let n = 0; while (acc >= 1 && n < 4000) { stepSim(SIM, 1); acc -= 1; n++; if (SIM.done) break; }
+    render5(); draw();
+    if (SIM.done) { stopSim(); return; }
+    simTimer = requestAnimationFrame(loop);
+  };
+  simTimer = requestAnimationFrame(loop);
+}
+let cov5 = { t: -1, v: 0 };
+function render5() {
+  if (!SIM) return;
+  document.querySelectorAll("#methodTabs button").forEach(b => b.classList.toggle("on", b.dataset.m === S.simCfg.method));
+  document.querySelectorAll("#speedTabs button").forEach(b => b.classList.toggle("on", +b.dataset.s === simSpeed));
+  const W = SIM, placed = W.piles.filter(q => q.state === "placed");
+  if (placed.length !== cov5.n) cov5 = { n: placed.length, v: simCoverage(W) };
+  const hh = Math.floor(W.t / 3600), mm = Math.floor(W.t % 3600 / 60);
+  $("stats5").innerHTML = [
+    ["Method", METHOD_NAMES[W.method]], ["Site clock", `${hh} h ${String(mm).padStart(2, "0")} min`],
+    ...W.types.map(t => [`<span style="color:${t.color}">●</span> ${t.name}`, `${placed.filter(q => q.ty.id === t.id).length} piles${W.full.has(t.id) ? " · full" : ""}`]),
+    ["Coverage of dump area", `<b>${f(cov5.v, 1)} %</b>`],
+    ["Trucks inside / waiting", `${W.trucks.length} / ${W.queue.length}`],
+    ["Avg / max wait at gate", `${f(W.stats.released ? W.stats.waitSum / W.stats.released / 60 : 0, 1)} / ${f(W.stats.maxWait / 60, 1)} min`],
+    ["Collisions", `<span class="${W.stats.collisions ? "bad" : "ok"}">${W.stats.collisions}</span>`],
+    ["Deadlocks", `<span class="${W.stats.deadlocks ? "bad" : "ok"}">${W.stats.deadlocks}</span>`],
+    ["Status", W.done ? `<span class="ok">Area full after ${f(W.fillTime / 3600, 1)} h</span>` : "running"],
+  ].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
+  banner(`${METHOD_NAMES[W.method]} · ${placed.length} piles · ${f(cov5.v, 1)} % covered`);
+}
+function compareAll() {
+  stopSim(); readCfg(); $("cmpBox").innerHTML = '<p class="hint">Running all three methods…</p>';
+  setTimeout(() => {
+    const rows = ["base", "grid", "touch"].map(m => { const W = runToEnd(newSim(m, Object.assign({}, S.simCfg))); return { m, s: simSummary(W), W }; });
+    const best = Math.max(...rows.map(r => r.s.cov));
+    $("cmpBox").innerHTML = `<table class="dims"><tr><td class="n">Method</td><td class="u">piles</td><td class="u">cover %</td><td class="u">hours</td><td class="u">coll.</td><td class="u">dead.</td></tr>${rows.map(r =>
+      `<tr${r.s.cov === best ? ' class="sel"' : ""}><td class="n">${METHOD_NAMES[r.m].split(" (")[0]}</td><td>${r.s.piles}</td><td><b>${f(r.s.cov, 1)}</b></td><td>${f(r.s.hours, 1)}</td><td>${r.s.collisions}</td><td>${r.s.deadlocks}</td></tr>`).join("")}</table>
+      <p class="hint">Same area, same fleet, same truck arrival sequence (seed ${S.simCfg.seed}). Click a method above and ▶ Play to watch it.</p>`;
+    const sel = rows.find(r => r.m === S.simCfg.method); SIM = sel.W; render5(); draw();
+  }, 30);
+}
+function draw5() {
+  if (!SIM) return; const W = SIM;
+  for (const L of W.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.08)"; ctx.fill(); }
+  W.R.zones.forEach(z => { pathOf(z.poly); ctx.strokeStyle = "#ffffff22"; ctx.lineWidth = 1; ctx.stroke(); });
+  for (const q of W.piles) {
+    const [X, Y] = W2S(q.p); ctx.beginPath(); ctx.arc(X, Y, q.r * view.s, 0, Math.PI * 2);
+    if (q.state === "placed") { ctx.fillStyle = q.ty.color + "aa"; ctx.fill(); ctx.strokeStyle = q.ty.color; ctx.lineWidth = 1; ctx.stroke(); }
+    else { ctx.setLineDash([4, 3]); ctx.strokeStyle = q.ty.color; ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); }
+  }
+  for (const tr of W.trucks) {
+    const [X, Y] = W2S(tr.pos), L = tr.ty.L * view.s, Wd = tr.ty.W * view.s;
+    ctx.save(); ctx.translate(X, Y); ctx.rotate(-tr.heading); ctx.fillStyle = tr.ty.color; ctx.strokeStyle = "#0f1419"; ctx.lineWidth = 1.5;
+    ctx.fillRect(-L / 2, -Wd / 2, L, Wd); ctx.strokeRect(-L / 2, -Wd / 2, L, Wd); ctx.fillStyle = "#0f1419"; ctx.fillRect(L / 2 - L * 0.22, -Wd / 2, L * 0.22, Wd * 0.5);
+    if (tr.phase === "dump") { ctx.fillStyle = "#fff"; ctx.font = "bold 10px system-ui"; ctx.fillText("DUMP", -L / 2, -Wd / 2 - 3); }
+    ctx.restore();
+  }
+  if (W.queue.length) { const g = W.R.lane.inLine[0], [X, Y] = W2S([g[0] - W.F.n[0] * 18, g[1] - W.F.n[1] * 18]); label(`${W.queue.length} waiting`, X, Y, "#e5534b", "#fff"); }
+}
+document.querySelectorAll("#methodTabs button").forEach(b => b.onclick = () => { S.simCfg.method = b.dataset.m; resetSim(); });
+document.querySelectorAll("#speedTabs button").forEach(b => b.onclick = () => { simSpeed = +b.dataset.s; render5(); });
+$("playBtn").onclick = () => simTimer ? stopSim() : playSim();
+$("resetBtn").onclick = resetSim;
+$("endBtn").onclick = () => { stopSim(); if (!SIM) resetSim(); runToEnd(SIM); render5(); draw(); };
+$("cmpBtn").onclick = compareAll;
+$("toR5").onclick = () => setRound(5);
+
+$("applyCfg").onclick = resetSim;
+// =====================================================================================
+// Rounds navigation & persistence
+// =====================================================================================
+function setRound(r) {
+  if (r >= 2 && !S.areaSaved) return banner("Build and save the dump area in Round 1 first");
+  if (r >= 3 && (!S.fleet.length || !S.fleet.every(t => calc(t).ok))) return banner("Complete the fleet in Round 2 first");
+  if (r >= 2 && (!S.poly || S.round === 1 && S.areaSaved)) { S.poly = S.areaSaved.polygon; S.entry = S.entry || S.areaSaved.entry; }
+  S.round = r;
+  document.querySelectorAll(".rounds button[data-round]").forEach(b => {
+    const k = +b.dataset.round; b.classList.toggle("on", k === r);
+    b.classList.toggle("done", (k === 1 && !!S.areaSaved) || (k === 2 && S.fleet.length > 0) || (k === 3 && r > 3) || (k === 4 && r > 4));
+  });
+  [1, 2, 3, 4, 5].forEach(k => $("aside" + k).hidden = k !== r);
+  $("fleetView").style.display = r === 2 ? "block" : "none";
+  cv.style.display = r === 2 ? "none" : "block";
+  $("banner").style.display = r === 2 ? "none" : "";
+  $("viewTabs").hidden = !(r === 1 && S.img && S.px);
+  setLegend();
+  if (r === 2) render2();
+  else { S.mode = "idle"; fitView(); if (r === 3) update3(); else if (r === 4) { computeSafe(); run4(); } else if (r === 5) { computeSafe(); if (!S.r4) run4(); resetSim(); } else draw(); }
+  if (r !== 5 && typeof stopSim === "function") stopSim();
+}
+document.querySelectorAll(".rounds button[data-round]").forEach(b => b.onclick = () => setRound(+b.dataset.round));
+function saveSession() { store.set("zadp.session", { area: S.areaSaved || null, fleet: S.fleet, arrivals: S.arrivals, sel: S.sel, laneW: S.laneW, sweep: S.sweep, gap: S.gap }); }
+function loadSession() {
+  const d = store.get("zadp.session", null); if (!d) return;
+  if (d.fleet) { S.fleet = d.fleet; tid = Math.max(0, ...S.fleet.map(t => t.id)) + 1; S.sel = d.sel; }
+  if (d.arrivals) S.arrivals = d.arrivals;
+  if (d.laneW) S.laneW = d.laneW; if (d.sweep != null) S.sweep = d.sweep; if (d.gap) S.gap = d.gap;
+  if (d.area && d.area.polygon) loadRecord(d.area);
+}
+function setLegend() {
+  const sw = (c, t) => `<span><i class="sw" style="background:${c}"></i>${t}</span>`;
+  $("legend").style.display = S.round === 2 ? "none" : "flex";
+  $("legend").innerHTML = S.round === 5
+    ? (SIM ? SIM.types.map(t => sw(t.color, t.name)).join("") : "") + sw("rgba(245,166,35,.4)", "Lane") + '<span>dashed circle = spot reserved, truck on its way</span>'
+    : S.round === 4
+    ? sw("var(--area)", "Dump area") + sw("#3fb68b", "Safe zone") + sw("rgba(245,166,35,.6)", "Lane (fills last)") + sw("#c9a46b", "Pile circle") + sw("var(--accent)", "Entry")
+    : S.round === 3
+    ? sw("var(--area)", "Dump area") + sw("var(--safe)", "Safe zone") + sw("var(--accent)", "Entry") + sw("var(--danger)", "Rear edges") + sw("var(--front)", "Front edges")
+    : S.view1 === "sketch" ? sw("#c98a1b", "Straight edge") + sw("#3d8fe0", "Arc") + sw("#3fb68b", "Number read & matched") + sw("#f5a623", "Entered by you") + sw("#e5534b", "Dimension needed") + sw("#8b9bab", "Number not used")
+    : sw("var(--area)", "Dump area (real size)") + sw("var(--accent)", "Entry");
+}
+function setViewTab() { $("vSketch").classList.toggle("on", S.view1 === "sketch"); $("vReal").classList.toggle("on", S.view1 === "real"); $("vReal").disabled = !S.poly; setLegend(); }
+$("vSketch").onclick = () => { S.view1 = "sketch"; setViewTab(); fitView(); draw(); };
+$("vReal").onclick = () => { if (!S.poly) return; S.view1 = "real"; setViewTab(); fitView(); draw(); };
+
+// =====================================================================================
+// Canvas
+// =====================================================================================
+function resize() { const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1; cv.width = r.width * dpr; cv.height = r.height * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); fitView(); draw(); }
+const sketchView = () => S.round === 1 && S.img && (S.mode === "pick" || S.view1 === "sketch");
+function fitView() {
+  const r = cv.getBoundingClientRect();
+  if (sketchView()) return setView(0, -S.img.height, S.img.width, 0);    // image px, y flipped
+  if (S.poly) { const b = bounds(S.poly), m = Math.max(b[2] - b[0], b[3] - b[1]) * .1; setView(b[0] - m, b[1] - m, b[2] + m, b[3] + m); }
+  else setView(0, 0, 200, 200 * r.height / Math.max(1, r.width));
+}
+function setView(minx, miny, maxx, maxy) {
+  const r = cv.getBoundingClientRect(), pad = 40;
+  view = { minx, miny, maxx, maxy };
+  view.s = Math.min((r.width - 2 * pad) / (maxx - minx), (r.height - 2 * pad) / (maxy - miny));
+  view.ox = (r.width - (maxx - minx) * view.s) / 2; view.oy = (r.height - (maxy - miny) * view.s) / 2;
+}
+const W2S = ([x, y]) => [view.ox + (x - view.minx) * view.s, view.oy + (view.maxy - y) * view.s];
+const S2W = (X, Y) => [view.minx + (X - view.ox) / view.s, view.maxy - (Y - view.oy) / view.s];
+const P2S = ([x, y]) => W2S([x, -y]);   // image px -> screen
+function pathOf(p, map = W2S, close = true) { ctx.beginPath(); p.forEach((q, i) => { const [X, Y] = map(q); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); if (close) ctx.closePath(); }
+
+function drawGrid(r) {
+  const raw = 60 / view.s, pow = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 5, 10].map(k => k * pow).find(v => v >= raw);
+  const [wx0, wy1] = S2W(0, 0), [wx1, wy0] = S2W(r.width, r.height);
+  ctx.lineWidth = 1; ctx.font = "11px system-ui"; ctx.fillStyle = "#5c6b7a"; ctx.strokeStyle = "#1c2630";
+  for (let x = Math.ceil(wx0 / step) * step; x <= wx1; x += step) { const [X] = W2S([x, 0]); ctx.beginPath(); ctx.moveTo(X, 0); ctx.lineTo(X, r.height); ctx.stroke(); ctx.fillText(+x.toFixed(3) + " m", X + 3, r.height - 6); }
+  for (let y = Math.ceil(wy0 / step) * step; y <= wy1; y += step) { const [, Y] = W2S([0, y]); ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(r.width, Y); ctx.stroke(); ctx.fillText(+y.toFixed(3) + " m", 4, Y - 3); }
+}
+function label(text, X, Y, bg, fg = "#0f1419") {
+  ctx.font = "bold 12px system-ui"; const w = ctx.measureText(text).width + 10;
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(X - w / 2, Y - 10, w, 20, 6); ctx.fill(); ctx.fillStyle = fg; ctx.textAlign = "center"; ctx.fillText(text, X, Y + 4); ctx.textAlign = "left";
+}
+
+// segment of a dimension in image px (polygon edge or line/arc segment)
+function segPx(i) { return S.hasArc ? S.segs[i] : { t: "line", a: S.verts[i], b: S.verts[(i + 1) % S.verts.length] }; }
+const dimColor = d => d && d.src === "sketch" ? "#3fb68b" : d && d.src === "user" ? "#f5a623" : "#8b9bab";
+// draw one segment (line or arc) through a map; arcs use their sampled points
+function strokeSeg(s, map) {
+  const pts = s.t === "line" ? [s.a, s.b] : sampleSegs([s], p => p).concat([s.b]);
+  ctx.beginPath(); pts.forEach((p, i) => { const [X, Y] = map(p); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke();
+}
+
+function draw() {
+  if (S.round === 2) return;
+  const r = cv.getBoundingClientRect(); ctx.clearRect(0, 0, r.width, r.height);
+  if (sketchView()) return drawSketch();
+  drawGrid(r);
+  if (!S.poly) return;
+  pathOf(S.poly); ctx.fillStyle = "rgba(201,164,107,.16)"; ctx.fill();
+  S.poly.forEach((a, i) => {
+    const b = S.poly[(i + 1) % S.poly.length], t = S.round === 3 ? S.edgeType[i] : null;
+    ctx.strokeStyle = t === "rear" ? "#e5534b" : t === "front" ? "#6cb6ff" : "#c9a46b"; ctx.lineWidth = 3;
+    const [X1, Y1] = W2S(a), [X2, Y2] = W2S(b); ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
+  });
+  if (S.round === 3 && S.safe.length) {
+    ctx.beginPath(); for (const q of S.safe) { q.forEach((pt, i) => { const [X, Y] = W2S(pt); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.closePath(); }
+    ctx.fillStyle = "rgba(63,182,139,.28)"; ctx.fill("evenodd"); ctx.setLineDash([7, 5]); ctx.strokeStyle = "#3fb68b"; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (S.round === 4) draw4();
+  if (S.round === 5) draw5();
+  // round 1: labels for every edge / arc, in metres
+  if (S.round === 1 && S.dims.length) {
+    const segs = S.segsM || S.poly.map((a, i) => ({ t: "line", a, b: S.poly[(i + 1) % S.poly.length] }));
+    const vert = segs.map(s => s.a);
+    segs.forEach((s, i) => {
+      const d = S.dims.find(x => (x.kind === "edge" || x.kind === "radius") && x.i === i);
+      if (s.t === "arc") {
+        const m = segMid(s), [MX, MY] = W2S(m), [CX, CY] = W2S(s.c);
+        ctx.strokeStyle = "#6cb6ff88"; ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(MX, MY); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = "#6cb6ff"; ctx.beginPath(); ctx.arc(CX, CY, 2.5, 0, 7); ctx.fill();
+        label(`R${d ? d.n : ""} ${f(s.r)} m`, (MX * 2 + CX) / 3, (MY * 2 + CY) / 3, d && d.src ? dimColor(d) : "#6cb6ff");
+      } else {
+        const L = Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]); if (L * view.s < 40) return;
+        const [X1, Y1] = W2S(s.a), [X2, Y2] = W2S(s.b), nx = (Y2 - Y1), ny = -(X2 - X1), nl = Math.hypot(nx, ny) || 1;
+        label(`${letter(i)}${letter((i + 1) % segs.length)} ${f(L)} m`, (X1 + X2) / 2 - nx / nl * 16, (Y1 + Y2) / 2 - ny / nl * 16, dimColor(d));
+      }
+    });
+    vert.forEach((q, i) => { const [X, Y] = W2S(q); ctx.fillStyle = "#c9a46b"; ctx.beginPath(); ctx.arc(X, Y, 4, 0, 7); ctx.fill();
+      ctx.fillStyle = "#f5a623"; ctx.font = "bold 13px system-ui"; ctx.fillText(letter(i), X + 7, Y - 7); });
+    if (S.hasArc) { const b = bounds(S.poly), [X0, Y0] = W2S([b[0], b[1]]), [X1, Y1] = W2S([b[2], b[3]]);
+      ctx.setLineDash([4, 4]); ctx.strokeStyle = "#8b9bab"; ctx.lineWidth = 1; ctx.strokeRect(X0, Y1, X1 - X0, Y0 - Y1); ctx.setLineDash([]);
+      label(`Width ${f(b[2] - b[0])} m`, (X0 + X1) / 2, Y0 + 18, dimColor(S.dims[0])); label(`Height ${f(b[3] - b[1])} m`, X1 + 60, (Y0 + Y1) / 2, dimColor(S.dims[1])); }
+  }
+  if (S.entry) {
+    const p = S.poly, a = p[S.entry.i], b = p[(S.entry.i + 1) % p.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const nx = (b[1] - a[1]) / L, ny = -(b[0] - a[0]) / L, len = 40 / view.s;
+    const [X0, Y0] = W2S([S.entry.pt[0] + nx * len, S.entry.pt[1] + ny * len]), [X1, Y1] = W2S(S.entry.pt);
+    ctx.strokeStyle = ctx.fillStyle = "#f5a623"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.stroke();
+    const an = Math.atan2(Y1 - Y0, X1 - X0); ctx.beginPath(); ctx.moveTo(X1, Y1);
+    ctx.lineTo(X1 - 12 * Math.cos(an - .45), Y1 - 12 * Math.sin(an - .45)); ctx.lineTo(X1 - 12 * Math.cos(an + .45), Y1 - 12 * Math.sin(an + .45)); ctx.fill();
+    ctx.font = "bold 12px system-ui"; ctx.fillText("ENTRY", X0 + 6, Y0);
+  }
+}
+
+// sketch analysis view: the image, the detected lines/arcs, and every number with what it was matched to
+function drawSketch() {
+  const [X0, Y0] = P2S([0, 0]);
+  ctx.fillStyle = "#fff"; ctx.fillRect(X0, Y0, S.img.width * view.s, S.img.height * view.s);
+  ctx.globalAlpha = S.mode === "pick" ? .6 : .45; ctx.drawImage(S.img, X0, Y0, S.img.width * view.s, S.img.height * view.s); ctx.globalAlpha = 1;
+  if (S.mode === "pick") {
+    S.cands.forEach(c => { pathOf(c.raw, P2S); ctx.fillStyle = c.on ? "rgba(245,166,35,.45)" : "rgba(108,182,255,.12)"; ctx.fill();
+      ctx.strokeStyle = c.on ? "#f5a623" : "#6cb6ff"; ctx.lineWidth = c.on ? 3 : 1.5; ctx.stroke(); });
+    return;
+  }
+  if (!S.px) return;
+  pathOf(S.px, P2S); ctx.fillStyle = "rgba(201,164,107,.15)"; ctx.fill();
+  // lines amber, arcs blue (with centre)
+  const n = S.hasArc ? S.segs.length : S.verts.length;
+  for (let i = 0; i < n; i++) { const s = segPx(i); ctx.strokeStyle = s.t === "arc" ? "#3d8fe0" : "#c98a1b"; ctx.lineWidth = 3; strokeSeg(s, P2S);
+    if (s.t === "arc") { const [CX, CY] = P2S(s.c); ctx.fillStyle = "#3d8fe0"; ctx.beginPath(); ctx.arc(CX, CY, 3, 0, 7); ctx.fill(); } }
+  if (S.hl != null) { const d = S.dims[S.hl]; ctx.strokeStyle = "#f5a623"; ctx.lineWidth = 7;
+    if (d.kind === "edge" || d.kind === "radius") strokeSeg(segPx(d.i), P2S);
+    else { const b = bounds(S.px); const [a1, b1] = P2S([b[0], b[3]]), [a2, b2] = P2S([b[2], b[1]]); ctx.beginPath();
+      if (d.kind === "width") { ctx.moveTo(a1, b1 + 14); ctx.lineTo(a2, b1 + 14); } else { ctx.moveTo(a2 + 14, b1); ctx.lineTo(a2 + 14, b2); } ctx.stroke(); } }
+  S.verts.forEach((q, i) => { const [X, Y] = P2S(q); ctx.fillStyle = "#c9a46b"; ctx.beginPath(); ctx.arc(X, Y, 5, 0, 7); ctx.fill(); label(letter(i), X + 12, Y - 12, "#c9a46b"); });
+  // needed values not yet known -> red "?"
+  S.dims.forEach(d => {
+    if (d.value != null || !d.req) return;
+    if (d.kind === "edge") { const [X, Y] = P2S(segMid(segPx(d.i))); label(`${dimName(d)} ?`, X, Y, "#e5534b", "#fff"); }
+    else { const b = bounds(S.px); const [X, Y] = d.kind === "width" ? P2S([(b[0] + b[2]) / 2, b[3]]) : P2S([b[2], (b[1] + b[3]) / 2]); label(`${dimName(d)} ?`, X, Y + (d.kind === "width" ? 18 : 0), "#e5534b", "#fff"); }
+  });
+  // arc radii labels
+  if (S.hasArc) S.dims.forEach(d => { if (d.kind !== "radius") return; const s = S.segs[d.i], [X, Y] = P2S(segMid(s)); label(`R${d.n}`, X, Y, d.value ? dimColor(d) : "#3d8fe0", "#fff"); });
+  // numbers read from the sketch
+  S.dets.forEach(d => {
+    const [X, Y] = P2S([d.x, d.y]), used = d.use != null, dim = used ? S.dims[d.use] : null;
+    if (used && (dim.kind === "edge" || dim.kind === "radius")) { const [MX, MY] = P2S(segMid(segPx(dim.i)));
+      ctx.strokeStyle = "#3fb68b"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(MX, MY); ctx.stroke(); ctx.setLineDash([]); }
+    label(used ? `${d.text} → ${dimName(dim).split(" ")[0]}` : d.text, X, Y, used ? "#3fb68b" : "#8b9bab");
+  });
+}
+
+// =====================================================================================
+// Mouse
+// =====================================================================================
+function nearestEdge([x, y]) {
+  const p = S.poly; let best = Infinity, bi = 0, bp = null;
+  for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length], dx = b[0] - a[0], dy = b[1] - a[1];
+    const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1))), q = [a[0] + t * dx, a[1] + t * dy], d = Math.hypot(q[0] - x, q[1] - y);
+    if (d < best) { best = d; bi = i; bp = q; } }
+  return { i: bi, pt: bp, d: best * view.s };
+}
+cv.addEventListener("pointerdown", e => {
+  if (e.button !== 0) return;
+  const w = S2W(e.offsetX, e.offsetY);
+  if (S.mode === "pick") { const pt = [w[0], -w[1]];
+    const k = S.cands.map((c, i) => ({ i, a: c.size })).filter(o => pointInPoly(pt, S.cands[o.i].raw)).sort((a, b) => a.a - b.a)[0];
+    if (k) { S.cands[k.i].on = !S.cands[k.i].on; draw(); } return; }
+  if (S.mode === "entry" && S.poly && !sketchView()) {
+    const ne = nearestEdge(w); S.entry = { i: ne.i, pt: ne.pt }; S.mode = "idle"; setEntryBtns();
+    if (S.round === 3) update3(); else draw(); banner("Entry set ✓"); }
+});
+
+// =====================================================================================
+// UI wiring
+// =====================================================================================
+function banner(t) { $("banner").textContent = t; }
+$("useSel").onclick = useSelection;
+function setEntryBtns() { ["entryBtn", "entryBtn3"].forEach(id => $(id).classList.toggle("on", S.mode === "entry")); }
+["entryBtn", "entryBtn3"].forEach(id => $(id).onclick = () => {
+  if (!S.poly) return banner("Build the shape first");
+  if (S.round === 1 && S.view1 !== "real") { S.view1 = "real"; setViewTab(); fitView(); draw(); }
+  S.mode = S.mode === "entry" ? "idle" : "entry"; setEntryBtns(); if (S.mode === "entry") banner("Click on the boundary where trucks enter"); });
+
+window.addEventListener("resize", resize);
+renderLib(); loadSession(); resize(); setRound(1);
+</script>
+</body>
+</html>
