@@ -47,7 +47,8 @@
   input[type=range] { flex: 1; accent-color: var(--accent); }
   .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .formula { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #0f1419; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin: 6px 0; color: #cfe3f5; white-space: pre-wrap; }
-  .stats { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
+  .stats { display: grid; grid-template-columns: minmax(110px, 45%) 1fr; gap: 3px 10px; font-variant-numeric: tabular-nums; }
+  .stats div:nth-child(even) { text-align: right; }
   .stats div:nth-child(odd) { color: var(--muted); }
   .ok { color: var(--accent2); } .bad { color: var(--danger); } .warn { color: var(--accent); }
   .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 18px 10px; text-align: center; color: var(--muted); cursor: pointer; }
@@ -128,7 +129,7 @@
           <b>Click or drop an image</b><br>Sketch or drawing of the dump area with its dimensions written on it</label>
         <h3>Or pick a sample sketch</h3>
         <div class="samples" id="samples"></div>
-        <h3>Or pick a sample sketch</h3>
+        
         <div class="samples" id="samples"></div>
         <div class="progress"><i id="prog"></i></div>
         <p class="hint" id="progMsg"></p>
@@ -210,6 +211,8 @@
         <h2>Step 3 · Hexagonal pile grid</h2>
         <p class="hint">One grid per truck type. Rows are (2r + spacing)·√3/2 apart and every other row is shifted half a step. Pile centre must be inside a zone; the pile circle must be inside the dump area and must not cover the lane. Spacing 0 = touching; negative = overlap.</p>
         <table class="dims" id="gridTable"></table>
+        <div class="row"><button id="gap0" style="flex:1">Touching (0 m)</button><button id="gapHuman" style="flex:1">Human-like overlap (−2 m)</button></div>
+        <p class="hint">Human operators place piles closer than their size, so neighbouring piles merge. Overlap packs more: in tests 0 m ≈ 77 %, −1 m ≈ 87 %, −2 m ≈ 94 % of the dump area.</p>
         <div class="row"><label><input type="checkbox" id="showNums" checked> Show fill order numbers</label></div>
       </section>
       <section class="card">
@@ -1390,6 +1393,19 @@ function render4() {
   banner(`${R.zones.length} zone(s) at ${S.sweep}° · ${G.spots.length} piles for ${S.fleet.find(t => t.id === S.view4).name}`);
 }
 
+// branch roads as dashed centre lines from the spine to the far end (what the trucks drive on)
+function drawBranchLines(R) {
+  const F = R.lane.F;
+  for (const z of R.zones) { if (!z.branch || !z.branch.length || z.dc == null) continue;
+    const lats = z.branch[0].map(q => latOf0(q, F)), l0 = Math.min(...lats), l1 = Math.max(...lats);
+    const P = u => [F.E[0] + F.t[0] * u + F.n[0] * z.dc, F.E[1] + F.t[1] * u + F.n[1] * z.dc];
+    const [X0, Y0] = W2S(P(l0)), [X1, Y1] = W2S(P(l1));
+    ctx.setLineDash([10, 6]); ctx.strokeStyle = "#ffffffcc"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.stroke(); ctx.setLineDash([]); }
+  // spine centre lines
+  ctx.strokeStyle = "#f5a623aa"; ctx.lineWidth = 1.5; ctx.setLineDash([10, 6]);
+  for (const L of [R.lane.inLine, R.lane.outLine]) { const [X0, Y0] = W2S(L[0]), [X1, Y1] = W2S(L[1]); ctx.beginPath(); ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.stroke(); }
+  ctx.setLineDash([]);
+}
 const ZONE_COLORS = ["#6cb6ff", "#b083f0", "#3fb68b", "#e0823d", "#e5534b", "#d6c14a", "#4fc1c9", "#e06cb0"];
 function draw4() {
   const R = S.r4; if (!R) return;
@@ -1398,7 +1414,8 @@ function draw4() {
   for (const q of S.safe) { pathOf(q); ctx.stroke(); } ctx.setLineDash([]);
   // zones
   R.zones.forEach((z, i) => { const col = ZONE_COLORS[i % ZONE_COLORS.length]; pathOf(z.poly); ctx.fillStyle = col + "22"; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke(); });
-  for (const B of R.branches) { pathOf(B); ctx.fillStyle = "rgba(255,255,255,.07)"; ctx.fill(); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#ffffffaa"; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]); }
+  for (const B of R.branches) { pathOf(B); ctx.fillStyle = "rgba(255,255,255,.07)"; ctx.fill(); }
+  drawBranchLines(R);
   // lane with in/out arrows
   for (const L of R.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.13)"; ctx.fill(); ctx.strokeStyle = "rgba(245,166,35,.7)"; ctx.setLineDash([8, 5]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); }
   const arrow = (line, col, txt) => { const [X0, Y0] = W2S(line[0]), [X1, Y1] = W2S(line[1]); ctx.strokeStyle = ctx.fillStyle = col; ctx.lineWidth = 2;
@@ -1425,6 +1442,8 @@ $("bestAngle").onclick = () => { S.sweep = bestSweep(S.safe.filter(p => area(p) 
 $("alignEntry").onclick = () => { S.sweep = sweepAlongEntry(); saveSession(); update3(); };
 $("rowsIn").onchange = () => { S.rows = Math.max(1, +$("rowsIn").value || 3); saveSession(); update3(); };
 $("showNums").onchange = draw;
+$("gap0").onclick = () => { S.fleet.forEach(t => S.gap[t.id] = 0); saveSession(); run4(); };
+$("gapHuman").onclick = () => { S.fleet.forEach(t => S.gap[t.id] = -2); saveSession(); run4(); };
 $("laneW").onchange = () => { const v = parseFloat($("laneW").value); S.laneW = v > 0 ? v : null; saveSession(); render2(); };
 $("toR4").onclick = () => setRound(4);
 
@@ -1525,6 +1544,11 @@ function buildRouteGrid(W) {
   G.ov = new Uint8Array(nx * ny);
   for (let k = 0; k < nx * ny; k++) { if (!G.base[k]) continue; const c = cellXY(G, k); G.ov[k] = (touches(c, inHalf) ? 1 : 0) | (touches(c, outHalf) ? 2 : 0); }
   G.band = G.side;
+  // branch centre lines: cheap to drive on, so routes follow the branch roads
+  G.road = new Uint8Array(nx * ny);
+  for (const z of W.R.zones) { if (!z.branch || !z.branch.length || z.dc == null) continue;
+    for (let k = 0; k < nx * ny; k++) { if (!G.base[k] || G.road[k]) continue; const c = cellXY(G, k);
+      if (Math.abs(depthOf(c, W.F) - z.dc) <= cs * 0.75 && z.branch.some(B => pointInPoly(c, B))) G.road[k] = 1; } }
   G.need = new Uint8Array(nx * ny);
   for (let k = 0; k < nx * ny; k++) { if (!G.base[k]) continue; if (G.side[k]) { G.need[k] = 1; continue; }
     const c = cellXY(G, k); if (inLane.some(L => distToEdges(c, L) < half + 0.75 * cs + 0.5)) G.need[k] = 1; }
@@ -1668,10 +1692,16 @@ function deepestZone(W) {
   const o = findSpot(W, W.smallest, { kind: "zone", quick: true }), ob = findSpot(W, W.smallest, { kind: "branch", quick: true });
   W._dz = { key, v: Math.max(o ? o.depth : -Infinity, ob ? ob.depth : -Infinity) }; return W._dz.v;
 }
+// Fill order = a clean front toward each access road:
+//  zones deepest first; inside a zone, rows farthest from its branch first, each row far end first;
+//  then the branch itself (far end first); the spine last (deepest first).
 function sortKeys(W, o) {
   o.depth = depthOf(o.c, W.F); o.lat = Math.abs(latOf(W, o.c)); o.z = o.kind === "lane" ? "L" : zoneOf(W, o.c);
-  const z = o.kind === "branch" ? W.R.zones.find(q => q.n === o.z) : null;
-  o.sd = z && z.dc != null ? z.dc : o.depth;          // all spots of a branch share one depth: far end first along the whole road
+  const z = o.kind === "lane" ? null : W.R.zones.find(q => q.n === o.z);
+  if (o.kind === "lane") { o.k1 = 1e6; o.k2 = o.depth; }
+  else if (o.kind === "branch") { o.k1 = (z ? z.n : 999) + 0.5; o.k2 = 0; }
+  else { o.k1 = z ? z.n : 999; o.k2 = z && z.dc != null && z.branch && z.branch.length ? Math.abs(o.depth - z.dc) : o.depth; }
+  o.sd = o.depth;
 }
 function candidates(W, ty, opts) {
   W.cc ??= new Map();
@@ -1690,7 +1720,7 @@ function candidates(W, ty, opts) {
   }
   if (C.dirty) {
     if (W.method === "grid") C.list.sort((a, b) => a.order - b.order);
-    else { const q = ty.r * 0.1; C.list.sort((a, b) => Math.round(b.sd / q) - Math.round(a.sd / q) || b.lat - a.lat); }   // deepest first, then farthest from the spine
+    else { const q = ty.r * 0.5; C.list.sort((a, b) => a.k1 - b.k1 || Math.round(b.k2 / q) - Math.round(a.k2 / q) || b.lat - a.lat); }   // zone by zone, row by row toward the road, far end first
     C.dirty = false;
   }
   let list = C.list;
@@ -1798,7 +1828,8 @@ function astar(G, start, goal, ok, mv) {
   const N = G.nx * G.ny;
   if (!G.as || G.as.N !== N) G.as = { N, g: new Float32Array(N), from: new Int32Array(N), stamp: new Uint32Array(N), shut: new Uint32Array(N), gen: 0, hk: new Int32Array(N * 4), hf: new Float32Array(N * 4) };
   const A = G.as, gen = ++A.gen, gx = goal % G.nx, gy = (goal / G.nx) | 0, hk = A.hk, hf = A.hf; let hn = 0;
-  const h = k => { const dx = Math.abs(k % G.nx - gx), dy = Math.abs(((k / G.nx) | 0) - gy); return Math.max(dx, dy) + 0.4142 * Math.min(dx, dy); };
+  const h = k => { const dx = Math.abs(k % G.nx - gx), dy = Math.abs(((k / G.nx) | 0) - gy); return 0.35 * (Math.max(dx, dy) + 0.4142 * Math.min(dx, dy)); };
+  const w = n => (G.road && G.road[n]) || (G.core && G.core[n]) ? 0.35 : 1;
   const push = (f, k) => { if (hn >= hk.length) return; let i = hn++; while (i) { const p = (i - 1) >> 1; if (hf[p] <= f) break; hf[i] = hf[p]; hk[i] = hk[p]; i = p; } hf[i] = f; hk[i] = k; };
   const pop = () => { const top = hk[0], lf = hf[--hn], lk = hk[hn]; let i = 0;
     for (;;) { const l = 2 * i + 1; if (l >= hn) break; const r = l + 1, m = r < hn && hf[r] < hf[l] ? r : l; if (hf[m] >= lf) break; hf[i] = hf[m]; hk[i] = hk[m]; i = m; }
@@ -1811,17 +1842,29 @@ function astar(G, start, goal, ok, mv) {
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
       if (!di && !dj) continue; const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= G.nx || jj >= G.ny) continue;
       const n = jj * G.nx + ii; if (A.shut[n] === gen || !(ok(n) || n === goal) || !mv(k, n)) continue;
-      const g = A.g[k] + (di && dj ? 1.4142 : 1);
+      const g = A.g[k] + (di && dj ? 1.4142 : 1) * w(n);
       if (A.stamp[n] !== gen || g < A.g[n]) { A.stamp[n] = gen; A.g[n] = g; A.from[n] = k; push(g + h(n), n); }
     }
   }
   return null;
 }
+function smoothPath(W, pts) {
+  const G = W.G; if (pts.length < 3) return pts;
+  const clear = (a, b) => { const d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(d / (G.cs * 0.5));
+    for (let i = 1; i < n; i++) { const p = [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n], k = cellAt(G, p);
+      if (k < 0 || !G.free[k] || G.side[k] || (W.halo && W.halo[k] > 0 && !G.need[k])) return false;
+      if (G.road[k] !== G.road[cellAt(G, a)]) return false; }                       // keep road sections on the road
+    return true; };
+  const out = [pts[0]]; let i = 0;
+  while (i < pts.length - 1) { let j = pts.length - 1; while (j > i + 1 && !clear(pts[i], pts[j])) j--; out.push(pts[j]); i = j; }
+  return out;
+}
 function routeIn(W, stop) {
   const G = W.G, d = depthOf(cellXY(G, stop), W.F), gate = laneAt(W, -1, 0).map((v, i) => v - W.F.n[i] * 25);
   for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
     const k0 = nearestFree(W, laneAt(W, -1, dd), -1); if (k0 < 0) continue;
-    const tail = astar(G, k0, stop, k => routeOk(W, k), G.mvIn); if (!tail) continue;
+    let tail = astar(G, k0, stop, k => routeOk(W, k), G.mvIn); if (!tail) continue;
+    tail = smoothPath(W, tail);
     return [gate, ...lanePath(W, -1, k0), ...tail.slice(1)];
   }
   return null;                                                          // not reachable now
@@ -1829,6 +1872,9 @@ function routeIn(W, stop) {
 // path inside one lane half, from the entry end to cell k (follows the lane even where the shape cuts into it)
 function lanePath(W, side, k) {
   const G = W.G, starts = side < 0 ? G.inStart : G.outEnd;
+  { const a = laneAt(W, side, 0), b = cellXY(G, k), d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(d / (G.cs * 0.5)); let ok = true;   // straight along the lane centre if possible
+    for (let i = 1; i < n && ok; i++) { const q = cellAt(G, [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]); if (q < 0 || G.side[q] !== side || !G.free[q]) ok = false; }
+    if (ok) return [a, b]; }
   const key = side + "|" + W.minLaneDepth; W._lp ??= {};
   if (!W._lp[key]) W._lp[key] = bfs(G, starts.filter(q => G.core[q] === side), q => G.core[q] === side && G.free[q]);
   const dist = W._lp[key];
@@ -1841,7 +1887,8 @@ function routeOut(W, from) {
   const G = W.G, d = depthOf(cellXY(G, from), W.F), exit = laneAt(W, 1, 0).map((v, i) => v - W.F.n[i] * 25);
   for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
     const k1 = nearestFree(W, laneAt(W, 1, dd), 1); if (k1 < 0) continue;
-    const head = astar(G, from, k1, k => routeOk(W, k) || k === from, G.mvOut); if (!head) continue;   // the truck's own cell is always usable
+    let head = astar(G, from, k1, k => routeOk(W, k) || k === from, G.mvOut); if (!head) continue;   // the truck's own cell is always usable
+    head = smoothPath(W, head);
     return { path: [...head, ...lanePath(W, 1, k1).reverse().slice(1), exit], laneIdx: head.length - 1 };
   }
   return null;                                                           // no way out right now: wait and retry
@@ -2037,7 +2084,7 @@ function draw5() {
   if (!SIM) return; const W = SIM;
   for (const L of W.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.08)"; ctx.fill(); }
   W.R.zones.forEach(z => { pathOf(z.poly); ctx.strokeStyle = "#ffffff22"; ctx.lineWidth = 1; ctx.stroke(); });
-  for (const B of W.R.branches || []) { pathOf(B); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#ffffff44"; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); }
+  drawBranchLines(W.R);
   for (const q of W.piles) {
     const [X, Y] = W2S(q.p); ctx.beginPath(); ctx.arc(X, Y, q.r * view.s, 0, Math.PI * 2);
     if (q.state === "placed") { ctx.fillStyle = q.ty.color + "aa"; ctx.fill(); ctx.strokeStyle = q.ty.color; ctx.lineWidth = 1; ctx.stroke(); }

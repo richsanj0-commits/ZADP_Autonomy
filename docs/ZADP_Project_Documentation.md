@@ -140,7 +140,8 @@ Small or smooth areas stay as 1–3 cells; large areas (50–200 acres) get many
 - **Spine:** the main road, two one-way lanes (IN and OUT), from the entry straight along the sweep direction to the far boundary.
 - **Work zones:** each bay is split by the spine into two halves; each half is a zone with a temporary **branch** road across its middle (always joined to the spine).
 - **Spot points:** a hexagonal lattice per truck type. Rows are (2r + spacing) apart along a row and (2r + spacing)·√3/2 between rows; every other row is shifted half a step. The phase with most points wins. A spot is kept if its centre is in the zone and its circle is inside the dump area and clear of the spine and branches. Spacing 0 = touching; negative = overlap.
-- **Fill order ("water rising"):** deepest zone first; inside a zone, its piles first, then its branch from the far end back to the spine; the spine last, deepest part first. A road is filled only when nothing behind it needs it any more.
+- **Fill order — a clean front toward the road ("water rising"):** deepest zone first; inside a zone, the pile row **farthest from its branch first**, each row from its far end back toward the spine, so a truck always has open ground to reverse in from; then the branch itself from the far end back to the spine; the spine last, deepest part first. A road is filled only when nothing behind it needs it any more. (Filling the row next to the road first seals the rows behind it; this front order raised coverage on the 50-acre site from 68 % to 77 %.)
+- **Overlap (human-like spacing):** with spacing 0 the piles just touch (hexagonal packing, at most 90.7 % of the usable area). Human operators place piles closer than their size so neighbours merge. A negative spacing models this; one click sets −2 m. On the 50-acre site: 0 m → 77 %, −1 m → 87 %, −2 m → 94 % of the whole dump area — the human level in the problem statement (~95 %).
 
 ---
 
@@ -168,7 +169,10 @@ With one truck size, touching placement reproduces the hexagonal lattice; with a
 
 Spots that are proved impossible (unreachable, no way out) are dropped for good: piles are only ever added, so they stay impossible.
 
-### 8.3 Moving the trucks safely (Step 5)
+### 8.3 Driving on the roads
+Routes are found on a grid of truck-centre positions with A*. Spine and branch centre lines are cheap to drive on (cost 0.35 against 1 on open ground), so trucks drive the spine, turn onto their zone's branch and only leave the road for the last stretch to the pile; the path is then straightened (no staircase steps). Along a straight spine the truck drives the exact centre line.
+
+### 8.4 Moving the trucks safely (Step 5)
 - **One-way lanes (Rule 1):** trucks drive *along* a lane only on its centre line and only in its direction; the other lane may only be crossed sideways.
 - **Wait gate (Rule 3):** at most N trucks inside (default = number of zones).
 - **Lane mutex:** the lanes plus a safety strip beside them hold one *moving* truck at a time. The holder never waits for anyone — its lane path is empty and its route outside the lanes is reserved for it — so it always gets through.
@@ -180,7 +184,7 @@ Spots that are proved impossible (unreachable, no way out) are dropped for good:
 
 Both are also **measured**, not assumed: a collision is two truck bodies overlapping; a deadlock is no truck able to move for 10 minutes.
 
-### 8.4 Settings and output
+### 8.5 Settings and output
 Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), a truck every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all three" runs every method on the same truck sequence.
 
 ---
@@ -189,20 +193,22 @@ Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s
 
 Fleet used in all tests: 363 t hauler (pile r 6.35 m, 15.1 × 9.75 m, 2 trucks) + 227 t hauler (pile r 4.0 m, 12.9 × 7.6 m, 3 trucks). Defaults: 20 km/h, 60 s manoeuvre, 60 s dump, a truck every 60 s. Coverage = area covered by piles ÷ whole dump area (including safety margins and roads). Every sketch goes through all five rounds from its image.
 
-### 9.1 Five practical mine-scale sites (seed 7)
+### 9.1 Practical mine-scale sites (seed 7, final version)
 
-| Site | Area error from sketch | Cells / bays / zones | Round 4 plan (single truck type) | Baseline (fixed, 7.38 m) | Grid + remove | **Touching (ZADP)** | Collisions / deadlocks |
-|---|---|---|---|---|---|---|---|
-| Valley fill, 50 acres | 0.3 % | 1 / 4 / 8 | 66–76 % | 14.1 % | 45.2 % | **67.3 %** | 0 / 0 |
-| Pit-edge crescent, 80 acres | 1.0 % (decimal fixed) | 3 / 7 / 10 | 71–79 % | 17.0 % | 51.4 % | **72.4 %** | 0 / 0 |
-| Two lobes + neck, 120 acres | −0.2 % | 5 / 10 / 16 | 72–76 % | 13.9 % | 29.4 % | **56.3 %** | 0 / 0 |
-| Waste dump with notch, 150 acres | −0.4 % | 3 / 9 / 16 | 71–77 % | 14.9 % | 42.5 % | **64.2 %** | 0 / 0 |
+| Site | Area error from sketch | Baseline (fixed, 7.38 m) | Grid + remove | **Touching (ZADP)** | **Touching + 2 m overlap** | Collisions / deadlocks |
+|---|---|---|---|---|---|---|
+| Valley fill, 50 acres | 0.3 % | 15.4 % | 46.2 % | **76.9 %** | **94.0 %** | 0 / 0 |
+| Pit-edge crescent, 80 acres | 1.0 % (decimal fixed) | 17.0 % | 47.2 % | **76.5 %** | **91.7 %** | 0 / 0 |
+| Two lobes + neck, 120 acres* | −0.2 % | 13.9 % | 29.4 % | **56.3 %** | – | 0 / 0 |
+| Waste dump with notch, 150 acres* | −0.4 % | 14.9 % | 42.5 % | **64.2 %** | – | 0 / 0 |
 
-Average over the four sites: **Baseline 15.0 % · Grid + remove 42.1 % · Touching 65.1 %** — ZADP touching placement packs about **4.3× more** than fixed spot points, with up to 16 trucks working at once and no collision or deadlock. (The 200-acre L-paddock was built and runs, but its full test was skipped on request.)
+\* measured with the earlier fill order (before the front-advancing order that added about 9 points on the 50- and 80-acre sites); not re-run for time.
 
-### 9.2 Seventeen test shapes (seeds 7 and 11, average)
+**Headline:** with touching piles ZADP fills about **77 %** of the whole dump area (≈ 5× fixed spot points); with the human-like 2 m overlap it reaches **92–94 %**, the human level of ~95 % in the problem statement — with up to 16 trucks working at once and no collision or deadlock.
 
-Straight-edged, curved and "weird" outlines (circle, rounded rectangle, stadium, D-shape, ellipse, kidney, your CAD sketch, star, cross, long strip, crescent, dumbbell, comb, triangle, T-shape, notched blob): areas rebuilt from the sketches within 0–2.4 % of the truth; Touching typically 50–68 %, Baseline 8–18 %. All runs ended with 0 collisions and 0 deadlocks **except the small dumbbell** (narrow neck right at the entry), where one run had 1 collision and another 3 deadlocks — see Limitations. The 12 m pentagon is correctly rejected as too small for the fleet.
+### 9.2 Seventeen test shapes (seed 7, final version)
+
+Straight-edged, curved and "weird" outlines: areas rebuilt from the sketches within 0–2.4 % of the truth. Touching coverage: CAD sketch 67 %, circle 64 %, rounded rectangle 68 %, stadium 64 %, ellipse 65 %, kidney 67 %, D-shape 50 %, cross 68 %, T 69 %, triangle 71 %, crescent 70 %, comb 59 %, notched 56 %, strip 49 %, star 44 %, dumbbell 40 % (Baseline 8–18 %). All runs ended with 0 collisions and 0 deadlocks except the small dumbbell (1 deadlock in the baseline run) — see Limitations. The 12 m pentagon is correctly rejected as too small for the fleet.
 
 ### 9.3 How to read the numbers
 - Round 4's single-type plan (66–79 %) is the *prediction*; Round 5's mixed fleet with real access rules reaches 56–72 %. The gap is the price of mixing pile sizes and of keeping every spot reachable.

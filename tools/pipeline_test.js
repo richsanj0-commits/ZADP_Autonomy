@@ -60,3 +60,13 @@ window.siteRun = async (fn, seeds = [7], methods = ["base", "grid", "touch"]) =>
 };
 window.siteBg = (list, seeds, methods) => { window.__site = {}; window.__siteBusy = true;
   (async () => { for (const fn of list) { try { window.__site[fn] = await siteRun(fn, seeds, methods); } catch (e) { window.__site[fn] = { error: String(e) }; } } window.__siteBusy = false; })(); return "started"; };
+// final table: methods at spacing 0, plus touching at -2 m overlap
+window.finalBg = (list) => { window.__fin = {}; window.__finBusy = true;
+  (async () => { for (const fn of list) { try {
+    S.fleet.forEach(t => S.gap[t.id] = 0);
+    const r = await siteRun(fn, [7]);
+    S.fleet.forEach(t => S.gap[t.id] = -2); run4();
+    const W = await runChunked(newSim("touch", Object.assign({}, S.simCfg, { seed: 7 }))), s = simSummary(W);
+    r.r5.overlap2 = `${s.cov.toFixed(1)}% ${s.piles}p ${s.hours.toFixed(0)}h c${s.collisions} d${s.deadlocks}${W.done ? "" : " NOTDONE"}`;
+    S.fleet.forEach(t => S.gap[t.id] = 0);
+    window.__fin[fn] = r; } catch (e) { window.__fin[fn] = { error: String(e) }; } } window.__finBusy = false; })(); return "started"; };
