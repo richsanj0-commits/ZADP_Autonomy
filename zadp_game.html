@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZADP Dump Planner</title>
-<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="vendor/clipper.js"></script>
+<script>window.ClipperLib || document.write('<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"><\/script>')</script>
+<script src="vendor/tesseract/tesseract.min.js"></script>
+<script>window.Tesseract || document.write('<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"><\/script>')</script>
 <style>
   :root {
     --bg: #0f1419; --panel: #182029; --panel2: #1f2a35; --line: #2c3a48;
@@ -51,6 +53,14 @@
   .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 18px 10px; text-align: center; color: var(--muted); cursor: pointer; }
   .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
   .drop b { color: var(--text); }
+  .samples { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .samples button { padding: 2px; background: #fff; border-radius: 6px; }
+  .samples img { width: 100%; height: 42px; object-fit: contain; display: block; }
+  .samples span { display: block; font-size: 10px; color: #333; }
+  .samples { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .samples button { padding: 2px; background: #fff; border-radius: 6px; }
+  .samples img { width: 100%; height: 42px; object-fit: contain; display: block; }
+  .samples span { display: block; font-size: 10px; color: #333; }
   .progress { height: 6px; background: #0f1419; border-radius: 3px; overflow: hidden; margin-top: 8px; }
   .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   .dims { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0; }
@@ -111,6 +121,10 @@
         <h2>1 · Upload the sketch</h2>
         <label class="drop" id="drop"><input type="file" id="fileIn" accept="image/*" hidden>
           <b>Click or drop an image</b><br>Sketch or drawing of the dump area with its dimensions written on it</label>
+        <h3>Or pick a sample sketch</h3>
+        <div class="samples" id="samples"></div>
+        <h3>Or pick a sample sketch</h3>
+        <div class="samples" id="samples"></div>
         <div class="progress"><i id="prog"></i></div>
         <p class="hint" id="progMsg"></p>
         <div id="pickBox" hidden>
@@ -327,7 +341,20 @@ const drop = $("drop");
 drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
 drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const file = e.dataTransfer.files[0]; if (file) openFile(file); };
-function openFile(file) { const img = new Image(); img.onload = () => analyseImage(img, file.name); img.src = URL.createObjectURL(file); }
+const SAMPLES = [
+  { file: "cad_curved", name: "CAD curved", W: 176.3607, H: 125.0513 },
+  { file: "weird_cross", name: "Cross", W: 210, H: 210 },
+  { file: "weird_crescent", name: "Crescent", W: 187.51, H: 220 },
+  { file: "kidney", name: "Kidney", W: 175, H: 119.66 },
+  { file: "weird_T", name: "T-shape", W: 240, H: 200 },
+];
+SAMPLES.forEach(sm => {
+  const b = document.createElement("button"); b.title = sm.name;
+  b.innerHTML = `<img src="test_sketches/${sm.file}.png" alt=""><span>${sm.name}</span>`;
+  b.onclick = () => { const img = new Image(); img.onload = () => { S.sample = sm; analyseImage(img, sm.file + ".png"); }; img.src = "test_sketches/" + sm.file + ".png"; };
+  $("samples").append(b);
+});
+function openFile(file) { S.sample = null; const img = new Image(); img.onload = () => analyseImage(img, file.name); img.src = URL.createObjectURL(file); }
 function progress(p, msg) { $("prog").style.width = (p * 100) + "%"; $("progMsg").textContent = msg || ""; }
 
 function analyseImage(img, name) {
@@ -545,7 +572,10 @@ async function readDimensions() {
   try {
     if (!ocrWorker) {
       progress(.25, "Loading the text reader (first time only)…");
-      ocrWorker = await Tesseract.createWorker("eng");
+      // text reader bundled in vendor/ (works offline); the online copy is only a fallback
+      const base = new URL("vendor/tesseract/", location.href).href;
+      try { ocrWorker = await Tesseract.createWorker("eng", 1, { workerPath: base + "worker.min.js", corePath: base + "core", langPath: base + "lang", workerBlobURL: false }); }
+      catch (e) { ocrWorker = await Tesseract.createWorker("eng"); }
       await ocrWorker.setParameters({ tessedit_char_whitelist: "0123456789.,minftcMN ", tessedit_pageseg_mode: "7" });
     }
     // find each text label, turn it level, and read it on its own
@@ -560,9 +590,15 @@ async function readDimensions() {
     S.dets = found;
   } catch (err) {
     console.error(err);
-    progress(1, "Could not load the text reader (needs internet). Enter the dimensions by hand.");
+    progress(1, location.protocol === "file:"
+      ? "The text reader cannot start when the page is opened as a file. Close it and double-click start.bat. (You can still type the dimensions below.)"
+      : "Could not start the text reader. Type the dimensions below, or pick a sample sketch.");
   }
   assignDims();
+  if (S.sample) for (const d of S.dims) {                       // sample sketch: overall size is known even if the reader misses it
+    if (d.kind === "width" && d.value == null) { d.value = S.sample.W; d.src = "user"; }
+    if (d.kind === "height" && d.value == null) { d.value = S.sample.H; d.src = "user"; }
+  }
   progress(1, S.dets.length ? `Read ${S.dets.length} number(s) from the sketch` : "No numbers found on the sketch — please enter the dimensions");
   renderDims(); draw();
 }

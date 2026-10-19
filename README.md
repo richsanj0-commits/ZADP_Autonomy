@@ -10,11 +10,17 @@ Browser simulation of **ZADP (Zoned Adaptive Dump Plan)** for autonomous haul-tr
 
 ## Run
 
+Windows: double-click `start.bat` (needs Python). It starts a local server and opens the page.
+
+Any system:
+
 ```
 python -m http.server 8765
 ```
 
-Then open `http://localhost:8765/zadp_game.html`. Reading dimensions from a sketch needs an internet connection the first time (the text reader loads from a CDN).
+then open `http://localhost:8765/zadp_game.html`. Works offline: the text reader and geometry library are bundled in `vendor/`. Do not open the HTML file directly (the text reader cannot start from a `file://` page).
+
+Round 1 also offers 5 sample sketches with known dimensions.
 
 ## Files
 
