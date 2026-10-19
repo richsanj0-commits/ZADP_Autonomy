@@ -78,6 +78,10 @@
   #viewTabs { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; }
   #banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(24,32,41,.94); max-width: 70%;
             border: 1px solid var(--accent); padding: 6px 14px; border-radius: 999px; font-size: 13px; pointer-events: none; text-align: center; }
+  #caption { position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); width: min(720px, 92%); background: rgba(15,20,25,.94);
+             border: 2px solid var(--accent); border-radius: 12px; padding: 12px 16px; font-size: 15px; line-height: 1.5; box-shadow: 0 6px 30px #0008; }
+  #caption b { color: var(--accent); }
+  #caption .step { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .8px; }
   .legend { position: absolute; bottom: 10px; left: 12px; background: rgba(24,32,41,.88); border: 1px solid var(--line);
             border-radius: 8px; padding: 6px 10px; font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
   .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
@@ -105,6 +109,7 @@
 <header>
   <h1><span>ZADP</span> Dump Planner</h1>
   <span class="units">Units everywhere: metres · tonnes · m³ · degrees · seconds</span>
+  <select id="demoSite" title="Site for the demo"></select><button id="demoBtn" class="primary">▶ Demo for judges</button>
   <nav class="rounds">
     <button data-round="1" class="on">Round 1 · Dump area</button>
     <button data-round="2">Round 2 · Fleet</button>
@@ -181,7 +186,14 @@
         <h2>3 · Safe boundary (Minkowski erosion)</h2>
         <p class="hint">Each edge moves inward by a margin, as in Step 1 of the method. The truck's GPS centre stays inside the green zone, so the whole truck body stays inside the dump area. The <b>largest margins in the fleet</b> are used, so every truck is safe.</p>
         <div class="stats" id="stats3"></div>
-        <div class="row"><button id="entryBtn3" style="flex:1">📍 Move entry point</button></div>
+      </section>
+      <section class="card">
+        <h2>Boustrophedon partition</h2>
+        <p class="hint">A sweep line crosses the safe zone. At every <b>critical point</b> (a corner where the shape's width changes) it cuts a new cell, so each cell is a simple strip without notches. Cells deeper than one <b>bay</b> are cut again into bays. A bay = one branch road with piles on both sides, sized from the trucks: one truck works one bay half at a time.</p>
+        <div class="row"><label>Sweep direction</label><input type="range" id="sweep" min="0" max="179" step="1" value="0"><span id="sweepVal" class="u" style="width:40px"></span></div>
+        <div class="row"><button id="alignEntry" style="flex:1">Along the entry</button><button id="bestAngle" style="flex:1">Fewest cells</button></div>
+        <div class="row"><label>Pile rows each side of a branch</label><input type="number" id="rowsIn" min="1" max="12" step="1" value="3"><span class="u"></span></div>
+        <div class="stats" id="stats3c"></div>
         <div class="row"><button class="primary" id="toR4" style="flex:1">Go to Round 4 →</button></div>
       </section>
     </div>
@@ -189,10 +201,9 @@
     <!-- ======================= ROUND 4 ======================= -->
     <div id="aside4" hidden>
       <section class="card">
-        <h2>Step 2 · Zones (Boustrophedon)</h2>
-        <p class="hint">A sweep line crosses the safe zone; at every corner where the shape's width changes it cuts a new zone. Each zone is a simple strip without notches.</p>
-        <div class="row"><label>Sweep angle</label><input type="range" id="sweep" min="0" max="179" step="1" value="0"><span id="sweepVal" class="u" style="width:40px"></span></div>
-        <div class="row"><button id="bestAngle" style="flex:1">★ Best angle (fewest zones)</button></div>
+        <h2>Entry, spine and branches</h2>
+        <p class="hint">The <b>spine</b> is the main two-way road (IN + OUT) from the entry along the sweep direction to the back. Each bay half gets a temporary one-truck <b>branch</b> road off the spine. Branches and spine are filled last, deepest part first — like water rising.</p>
+        <div class="row"><button id="entryBtn3" style="flex:1">📍 Choose entry side</button></div>
         <div class="stats" id="stats4z"></div>
       </section>
       <section class="card">
@@ -248,6 +259,7 @@
     <div id="banner">Upload a sketch of the dump area with its dimensions</div>
     <div id="viewTabs" hidden><button id="vSketch" class="on">Sketch analysis</button><button id="vReal">Real shape (m)</button></div>
     <div class="legend" id="legend"></div>
+    <div id="caption" hidden></div>
   </div>
 </main>
 
@@ -342,11 +354,11 @@ drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
 drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const file = e.dataTransfer.files[0]; if (file) openFile(file); };
 const SAMPLES = [
-  { file: "cad_curved", name: "CAD curved", W: 176.3607, H: 125.0513 },
-  { file: "weird_cross", name: "Cross", W: 210, H: 210 },
-  { file: "weird_crescent", name: "Crescent", W: 187.51, H: 220 },
-  { file: "kidney", name: "Kidney", W: 175, H: 119.66 },
-  { file: "weird_T", name: "T-shape", W: 240, H: 200 },
+  { file: "site_valley_fill_50ac", name: "Valley fill 50 ac", W: 715.7, H: 336.3 },
+  { file: "site_pit_crescent_80ac", name: "Pit crescent 80 ac", W: 1019.1, H: 574.6 },
+  { file: "site_two_lobes_120ac", name: "Two lobes 120 ac", W: 1177.9, H: 569.2 },
+  { file: "site_waste_dump_150ac", name: "Waste dump 150 ac", W: 907.6, H: 705.9 },
+  { file: "site_L_paddock_200ac", name: "L paddock 200 ac", W: 1157.3, H: 1052.1 },
 ];
 SAMPLES.forEach(sm => {
   const b = document.createElement("button"); b.title = sm.name;
@@ -790,6 +802,19 @@ function assignDims() {
     if (d.use != null || dim.value != null) continue;
     dim.value = d.value; dim.src = "sketch"; dim.det = k; d.use = i;
   }
+  fixDecimals();
+}
+// The text reader sometimes drops a decimal point ("1019.1" -> "10191"). Every value implies a scale
+// (metres per drawing pixel); a value whose scale is ~10x, 100x or 1000x the others' is corrected
+// by restoring the decimal point, and flagged so the user checks it.
+function fixDecimals() {
+  const read = S.dims.filter(d => d.value > 0 && d.src === "sketch");
+  if (read.length < 2) return;
+  const sc = read.map(d => d.value / measurePx(d)), sorted = sc.slice().sort((a, b) => a - b), med = sorted[0];   // decimals are only ever lost: trust the smallest scale
+  read.forEach((d, i) => {
+    const ratio = sc[i] / med; if (ratio < 3) return;
+    for (const k of [10, 100, 1000]) if (Math.abs(ratio / k - 1) < 0.15) { d.value = +(d.value / k).toFixed(4); d.src = "fixed"; break; }
+  });
 }
 
 function renderDims() {
@@ -803,7 +828,7 @@ function renderDims() {
   $("dimTable").innerHTML = S.dims.map((d, k) => `<tr data-k="${k}" class="${S.hl === k ? "sel" : ""}">
       <td class="n">${dimName(d)}</td>
       <td><input type="number" step="0.01" min="0" data-k="${k}" value="${d.value ?? ""}" placeholder="${d.req ? "enter" : "optional"}"></td><td class="u">m</td>
-      <td>${d.src === "sketch" ? '<span class="tag ok">read from sketch</span>' : d.src === "user" ? '<span class="tag warn">entered</span>' : d.req ? '<span class="tag bad">needed</span>' : '<span class="tag" style="color:var(--muted)">optional</span>'}</td>
+      <td>${d.src === "fixed" ? '<span class="tag warn" title="decimal point restored — please check">read · decimal fixed</span>' : d.src === "sketch" ? '<span class="tag ok">read from sketch</span>' : d.src === "user" ? '<span class="tag warn">entered</span>' : d.req ? '<span class="tag bad">needed</span>' : '<span class="tag" style="color:var(--muted)">optional</span>'}</td>
       <td class="u">${S.fit && S.fit.len[k] != null ? f(S.fit.len[k]) : ""}</td></tr>`).join("");
   $("dimTable").querySelectorAll("input").forEach(el => {
     el.onchange = () => { const d = S.dims[+el.dataset.k], v = parseFloat(el.value);
@@ -1116,7 +1141,8 @@ function update3() {
   $("stats3").innerHTML = [["Dump area", `${f(A, 1)} m²`], ["Safe zone", `${f(As, 1)} m²`], ["Usable", `${f(As / A * 100, 1)} %`],
     ["Side margin", `${f(g.side)} m · ${g.by?.side ?? ""}`], ["Rear margin", `${f(g.rear)} m · ${g.by?.rear ?? ""}`], ["Front margin", `${f(g.front)} m · ${g.by?.front ?? ""}`]]
     .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
-  banner(As > 0 ? "Safe boundary drawn from the largest truck margins in the fleet" : "⚠ No safe zone left — the area is too small for this fleet");
+  banner(As > 0 ? "Safe zone (Minkowski erosion) and its Boustrophedon partition" : "⚠ No safe zone left — the area is too small for this fleet");
+  partition(); render3c();
   draw();
 }
 
@@ -1146,7 +1172,11 @@ function laneWidth() { return S.laneW > 0 ? +S.laneW : Math.max(0, ...S.fleet.ma
 // entry frame: E = entry point, n = inward normal (depth direction)
 function entryFrame() {
   const p = S.poly, a = p[S.entry.i], b = p[(S.entry.i + 1) % p.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  return { E: S.entry.pt, n: [-(b[1] - a[1]) / L, (b[0] - a[0]) / L], t: [(b[0] - a[0]) / L, (b[1] - a[1]) / L] };
+  const inward = [-(b[1] - a[1]) / L, (b[0] - a[0]) / L];
+  if (S.sweep == null) return { E: S.entry.pt, n: inward, t: [(b[0] - a[0]) / L, (b[1] - a[1]) / L] };
+  const th = S.sweep * Math.PI / 180; let n = [Math.cos(th), Math.sin(th)];
+  if (n[0] * inward[0] + n[1] * inward[1] < 0) n = [-n[0], -n[1]];            // spine points into the area
+  return { E: S.entry.pt, n, t: [n[1], -n[0]] };
 }
 const depthOf = (p, F) => (p[0] - F.E[0]) * F.n[0] + (p[1] - F.E[1]) * F.n[1];
 
@@ -1231,62 +1261,127 @@ function hexIn(cell, deg, r, gap, accept) {
 
 function run4() {
   if (!S.poly || !S.entry) return;
-  const g = governing(); computeSafe();
-  const lane = buildLane(), F = lane.F;
-  // zones = safe zone minus the lane
-  const region = pieces(clip(S.safe.filter(p => area(p) > 0), lane.poly, CT().ctDifference));
-  if (S.sweep == null) S.sweep = bestSweep(region);
-  let zones = decompose(region, S.sweep).map(poly => ({ poly, depth: depthOf(centroidOf(poly), F) }));
-  zones.sort((p, q) => q.depth - p.depth);                         // back-to-front: deepest zone first
+  computeSafe(); partition(); if (!S.part) { S.r4 = null; banner("No safe zone — area too small for this fleet"); draw(); return; }
+  const P = S.part, lane = buildLane(), F = lane.F, a = -S.sweep * Math.PI / 180, inner = S.safe.filter(p => area(p) > 0);
+  // zones = bay halves (each bay cut by the spine); each zone gets a branch road through the middle of its bay
+  let zones = [];
+  for (const bay of P.bays) for (const half of pieces(clip([bay.poly], lane.poly, CT().ctDifference))) {
+    if (area(half) < 1) continue;
+    // branch road across the bay, at the bay's middle depth, but never beyond the end of the spine (it must join it)
+    const bd = bay.poly.map(q => depthOf(q, F)), hd = half.map(q => depthOf(q, F));
+    const dc = Math.max(P.bw / 2 + 1, Math.min((Math.min(...bd) + Math.max(...bd)) / 2, lane.depthMax - P.bw / 2 - 1));
+    let branch = [];
+    if (Math.max(...hd) - Math.min(...hd) > P.bw * 2.2 && dc > Math.min(...hd) && dc < Math.max(...hd)) {
+      const BIG = 1e5, Pt = (u, v) => [F.E[0] + F.t[0] * u + F.n[0] * v, F.E[1] + F.t[1] * u + F.n[1] * v];
+      const strip = [Pt(-BIG, dc - P.bw / 2), Pt(BIG, dc - P.bw / 2), Pt(BIG, dc + P.bw / 2), Pt(-BIG, dc + P.bw / 2)];
+      branch = pieces(clip([half], [strip], CT().ctIntersection)).sort((p, q) => area(q) - area(p)).slice(0, 1);
+    }
+    zones.push({ poly: half, branch, bay: bay.cell, depth: depthOf(centroidOf(half), F), dc });
+  }
+  zones.sort((p, q) => q.depth - p.depth);                           // back-to-front: deepest bay first
   zones.forEach((z, i) => z.n = i + 1);
-  const laneSafe = pieces(clip(lane.poly, S.safe.filter(p => area(p) > 0), CT().ctIntersection));
-  const laneDeg = Math.atan2(F.n[1], F.n[0]) * 180 / Math.PI;
-  // grids, one per truck type
+  const branches = zones.flatMap(z => z.branch);
+  const region = pieces(clip(zones.map(z => z.poly), branches, CT().ctDifference));   // pile area (outside spine and branches)
+  const branchSafe = pieces(clip(branches, inner, CT().ctIntersection));
+  const laneSafe = pieces(clip(lane.poly, inner, CT().ctIntersection));
+  const rowDeg = S.sweep + 90;                                      // pile rows run along the branches
   const grids = {};
   for (const t of S.fleet) {
     const r = calc(t).r, gap = +(S.gap[t.id] ?? 0), d = 2 * r + gap;
-    const placed = [];
-    const freeOf = (p, pts) => [...placed, ...pts].every(q => Math.hypot(q[0] - p[0], q[1] - p[1]) >= d - 1e-6);
+    const hash = new PileHash(d + 1);
+    const freeOf = (p, pts) => hash.near(p, d + 1).every(q => Math.hypot(q.p[0] - p[0], q.p[1] - p[1]) >= d - 1e-6) && pts.every(q => Math.hypot(q[0] - p[0], q[1] - p[1]) >= d - 1e-6);
     const insideArea = p => pointInPoly(p, S.poly) && distToEdges(p, S.poly) >= r - 1e-6;
-    const clearOfLane = p => lane.poly.every(L => !pointInPoly(p, L) && distToEdges(p, L) >= r - 1e-6);
-    const spots = [];
+    const clear = (p, polys) => polys.every(L => !pointInPoly(p, L) && distToEdges(p, L) >= r - 1e-6);
+    const put = (p, extra) => { const q = { p, ...extra }; hash.add(q); return q; };
+    const seq = [];
+    let nZ = 0, nB = 0;
     for (const z of zones) {
-      const pts = hexIn(z.poly, S.sweep, r, gap, (p, pts) => insideArea(p) && clearOfLane(p) && freeOf(p, pts));
-      pts.sort((p, q) => depthOf(q, F) - depthOf(p, F));            // deepest first inside the zone
-      for (const p of pts) { placed.push(p); spots.push({ p, zone: z.n, lane: false, depth: depthOf(p, F) }); }
+      const zp = [];
+      for (const piece of pieces(clip([z.poly], z.branch, CT().ctDifference)))
+        zp.push(...hexIn(piece, rowDeg, r, gap, (p, pts) => insideArea(p) && clear(p, lane.poly) && clear(p, branches) && freeOf(p, pts)));
+      zp.sort((p, q) => depthOf(q, F) - depthOf(p, F) || Math.abs(latOf0(q, F)) - Math.abs(latOf0(p, F)));
+      for (const p of zp) seq.push(put(p, { zone: z.n, kind: "zone", depth: depthOf(p, F) }));
+      nZ += zp.length;
+      // the zone's branch, far end first
+      const bp = [];
+      for (const piece of pieces(clip(z.branch, inner, CT().ctIntersection)))
+        bp.push(...hexIn(piece, rowDeg, r, gap, (p, pts) => insideArea(p) && clear(p, lane.poly) && freeOf(p, pts)));
+      bp.sort((p, q) => Math.abs(latOf0(q, F)) - Math.abs(latOf0(p, F)));
+      for (const p of bp) seq.push(put(p, { zone: z.n, kind: "branch", depth: depthOf(p, F) }));
+      nB += bp.length;
     }
-    // lane spots (filled last, deepest first)
+    // spine spots (filled last, deepest first): each goes right after the last zone/branch spot deeper than it
     const lanePts = [];
-    for (const L of laneSafe) for (const p of hexIn(L, laneDeg, r, gap, (p, pts) => insideArea(p) && freeOf(p, pts))) { placed.push(p); lanePts.push({ p, zone: 0, lane: true, depth: depthOf(p, F) }); }
+    for (const L of laneSafe) for (const p of hexIn(L, S.sweep, r, gap, (p, pts) => insideArea(p) && freeOf(p, pts))) lanePts.push(put(p, { zone: 0, kind: "lane", depth: depthOf(p, F) }));
     lanePts.sort((p, q) => q.depth - p.depth);
-    // fill order: zone spots in zone order; a lane spot goes right after the last zone spot that is deeper than it
-    const seq = spots.slice(); let last = -1;
-    for (const L of lanePts) {
-      let pos = -1; seq.forEach((s, i) => { if (!s.lane && s.depth >= L.depth) pos = i; });
-      pos = Math.max(pos, last); seq.splice(pos + 1, 0, L); last = pos + 1;
-    }
-    seq.forEach((s, i) => s.order = i + 1);
-    // coverage = area of the union of pile circles / area
-    const circles = seq.map(s => Array.from({ length: 32 }, (_, k) => [s.p[0] + r * Math.cos(k * Math.PI / 16), s.p[1] + r * Math.sin(k * Math.PI / 16)]));
-    const covA = circles.length ? sumArea(clip(clip(circles, [], CT().ctUnion), [S.poly], CT().ctIntersection)) : 0;
-    grids[t.id] = { r, gap, spots: seq, nZone: spots.length, nLane: lanePts.length, cov: covA / Math.abs(area(S.poly)) * 100, covSafe: covA / Math.max(1e-9, sumArea(S.safe)) * 100 };
+    let last = -1;
+    for (const L of lanePts) { let pos = -1; seq.forEach((s, i) => { if (s.kind !== "lane" && s.depth >= L.depth) pos = i; }); pos = Math.max(pos, last); seq.splice(pos + 1, 0, L); last = pos + 1; }
+    seq.forEach((s, i) => { s.order = i + 1; s.lane = s.kind === "lane"; });
+    const covA = gap >= 0 ? seq.length * Math.PI * r * r      // circles never overlap at spacing >= 0 and stay inside the area
+      : sumArea(clip(clip(seq.map(s => Array.from({ length: 24 }, (_, k) => [s.p[0] + r * Math.cos(k * Math.PI / 12), s.p[1] + r * Math.sin(k * Math.PI / 12)])), [], CT().ctUnion), [S.poly], CT().ctIntersection));
+    grids[t.id] = { r, gap, spots: seq, nZone: nZ, nBranch: nB, nLane: lanePts.length, cov: covA / Math.abs(area(S.poly)) * 100, covSafe: covA / Math.max(1e-9, sumArea(S.safe)) * 100 };
   }
-  S.r4 = { lane, zones, region, grids, laneSafe };
+  S.r4 = { lane, zones, region, branches, branchSafe, grids, laneSafe };
   if (S.view4 == null || !S.fleet.some(t => t.id === S.view4)) S.view4 = S.fleet[0].id;
   render4(); draw();
 }
+const latOf0 = (p, F) => (p[0] - F.E[0]) * F.t[0] + (p[1] - F.E[1]) * F.t[1];
 const centroidOf = p => { let cx = 0, cy = 0, a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length], k = x1 * y2 - x2 * y1; cx += (x1 + x2) * k; cy += (y1 + y2) * k; a += k; } return [cx / (3 * a), cy / (3 * a)]; };
+
+// ---------------- partition (Round 3): Boustrophedon cells, then bays sized from the trucks
+function sweepAlongEntry() {   // sweep axis = into the area from the entry (the spine will run this way)
+  const p = S.poly, a = p[S.entry.i], b = p[(S.entry.i + 1) % p.length];
+  return Math.round(((Math.atan2(b[0] - a[0], -(b[1] - a[1])) * 180 / Math.PI) % 180 + 180) % 180);
+}
+function bayDepth() {
+  const c = S.fleet.map(calc), rmax = Math.max(...c.map(x => x.r)), Wmax = Math.max(...S.fleet.map(t => +t.W || 0));
+  const rows = Math.max(1, +S.rows || 3), reach = rows * 2 * rmax * 0.866 + rmax, bw = Wmax * 1.4 + 2;   // truck + clearance each side
+  return { B: 2 * reach + bw, bw, reach, rows, rmax };   // bay = branch road + `rows` pile rows on each side
+}
+function partition() {
+  const safe = S.safe.filter(p => area(p) > 0); if (!safe.length || !S.fleet.length) { S.part = null; return; }
+  if (S.sweep == null) S.sweep = sweepAlongEntry();
+  const cells = decompose(safe, S.sweep), bd = bayDepth(), a = -S.sweep * Math.PI / 180, bays = [];
+  cells.forEach((cell, ci) => {
+    const R = cell.map(q => rot(q, a)), b = bounds(R), nb = Math.max(1, Math.round((b[2] - b[0]) / bd.B)), step = (b[2] - b[0]) / nb;
+    for (let k = 0; k < nb; k++) {
+      const x0 = b[0] + k * step, x1 = x0 + step, rect = [[x0, b[1] - 1], [x1, b[1] - 1], [x1, b[3] + 1], [x0, b[3] + 1]];
+      for (const pc of pieces(clip([R], [rect], CT().ctIntersection))) if (area(pc) > 1) bays.push({ poly: pc.map(q => rot(q, -a)), cell: ci + 1, xc: (x0 + x1) / 2, depthB: step });
+    }
+  });
+  S.part = { cells, bays, theta: S.sweep, ...bd };
+}
+function render3c() {
+  if (!S.part) { $("stats3c").innerHTML = "<div>No safe zone</div><div></div>"; return; }
+  const P = S.part;
+  $("sweep").value = S.sweep; $("sweepVal").textContent = S.sweep + "°"; $("rowsIn").value = P.rows;
+  $("stats3c").innerHTML = [["Boustrophedon cells", `<b>${P.cells.length}</b>`], ["Bays (after cutting by bay depth)", `<b>${P.bays.length}</b>`],
+    ["Bay depth", `${f(P.B, 1)} m = 2 × ${f(P.reach, 1)} m piles + ${f(P.bw, 1)} m branch`], ["Max trucks dumping at once", `≈ ${P.bays.length * 2} (one per bay half)`]]
+    .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
+}
+function draw3c() {
+  const P = S.part; if (!P) return;
+  P.bays.forEach(b => { pathOf(b.poly); ctx.fillStyle = ZONE_COLORS[(b.cell - 1) % ZONE_COLORS.length] + "18"; ctx.fill(); ctx.setLineDash([5, 4]); ctx.strokeStyle = "#ffffff55"; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); });
+  P.cells.forEach((c, i) => { pathOf(c); ctx.strokeStyle = ZONE_COLORS[i % ZONE_COLORS.length]; ctx.lineWidth = 2.5; ctx.stroke(); const [X, Y] = W2S(centroidOf(c)); label("C" + (i + 1), X, Y, ZONE_COLORS[i % ZONE_COLORS.length], "#0f1419"); });
+  // sweep direction arrow
+  const bb = bounds(S.poly), c0 = [(bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2], th = S.sweep * Math.PI / 180, L = Math.max(bb[2] - bb[0], bb[3] - bb[1]) * 0.15;
+  const [X0, Y0] = W2S([c0[0] - Math.cos(th) * L, c0[1] - Math.sin(th) * L]), [X1, Y1] = W2S([c0[0] + Math.cos(th) * L, c0[1] + Math.sin(th) * L]);
+  ctx.strokeStyle = ctx.fillStyle = "#ffffffaa"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X0, Y0); ctx.lineTo(X1, Y1); ctx.stroke();
+  const an = Math.atan2(Y1 - Y0, X1 - X0); ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X1 - 12 * Math.cos(an - .4), Y1 - 12 * Math.sin(an - .4)); ctx.lineTo(X1 - 12 * Math.cos(an + .4), Y1 - 12 * Math.sin(an + .4)); ctx.fill();
+  ctx.font = "bold 11px system-ui"; ctx.fillText("sweep", X1 + 6, Y1);
+}
 
 function render4() {
   const R = S.r4; if (!R) return;
-  $("sweep").value = S.sweep; $("sweepVal").textContent = S.sweep + "°";
-  $("stats4z").innerHTML = `<div>Zones</div><div><b>${R.zones.length}</b></div><div>Fill order</div><div>Z1 (deepest) → Z${R.zones.length} (nearest entry) → lane</div>`;
+  $("stats4z").innerHTML = [["Work zones (bay halves)", `<b>${R.zones.length}</b>`], ["Branch roads", R.zones.filter(z => z.branch.length).length],
+    ["Spine", `2 × ${f(R.lane.w, 1)} m wide, ${f(R.lane.depthMax, 0)} m long`], ["Fill order", `Z1 (deepest) → Z${R.zones.length} · each zone: piles, then its branch · spine last`]]
+    .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
   $("gridTable").innerHTML = `<tr><td class="n"></td><td class="u">r m</td><td class="u">spacing m</td><td class="u">piles</td><td class="u">cover %</td></tr>` +
     S.fleet.map(t => { const G = R.grids[t.id]; return `<tr class="${t.id === S.view4 ? "sel" : ""}" data-id="${t.id}" style="cursor:pointer">
       <td class="n">${t.name}</td><td>${f(G.r)}</td>
       <td><input type="number" step="0.1" data-id="${t.id}" value="${S.gap[t.id] ?? 0}" min="${f(-G.r, 1)}" style="width:62px"></td>
-      <td>${G.nZone}${G.nLane ? ` + ${G.nLane}` : ""}</td><td title="of dump area / of safe zone">${f(G.cov, 1)} / ${f(G.covSafe, 1)}</td></tr>`; }).join("") +
-    `<tr><td colspan="5" class="u" style="font-size:11px">piles = zone spots + lane spots · cover = % of dump area / % of safe zone · click a row to view its grid</td></tr>`;
+      <td title="zone + branch + spine">${G.nZone} + ${G.nBranch} + ${G.nLane}</td><td title="of dump area / of safe zone">${f(G.cov, 1)} / ${f(G.covSafe, 1)}</td></tr>`; }).join("") +
+    `<tr><td colspan="5" class="u" style="font-size:11px">piles = zone + branch + spine spots · cover = % of dump area / % of safe zone · click a row to view its grid</td></tr>`;
   $("gridTable").querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = e => { if (e.target.tagName === "INPUT") return; S.view4 = +tr.dataset.id; render4(); draw(); });
   $("gridTable").querySelectorAll("input").forEach(el => el.onchange = () => { S.gap[+el.dataset.id] = +el.value || 0; saveSession(); run4(); });
   const G = R.grids[S.view4];
@@ -1303,6 +1398,7 @@ function draw4() {
   for (const q of S.safe) { pathOf(q); ctx.stroke(); } ctx.setLineDash([]);
   // zones
   R.zones.forEach((z, i) => { const col = ZONE_COLORS[i % ZONE_COLORS.length]; pathOf(z.poly); ctx.fillStyle = col + "22"; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke(); });
+  for (const B of R.branches) { pathOf(B); ctx.fillStyle = "rgba(255,255,255,.07)"; ctx.fill(); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#ffffffaa"; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]); }
   // lane with in/out arrows
   for (const L of R.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.13)"; ctx.fill(); ctx.strokeStyle = "rgba(245,166,35,.7)"; ctx.setLineDash([8, 5]); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); }
   const arrow = (line, col, txt) => { const [X0, Y0] = W2S(line[0]), [X1, Y1] = W2S(line[1]); ctx.strokeStyle = ctx.fillStyle = col; ctx.lineWidth = 2;
@@ -1314,7 +1410,8 @@ function draw4() {
   const G = R.grids[S.view4], rp = G.r * view.s, nums = $("showNums").checked && rp > 8;
   for (const s of G.spots) {
     const [X, Y] = W2S(s.p); ctx.beginPath(); ctx.arc(X, Y, rp, 0, Math.PI * 2);
-    ctx.fillStyle = s.lane ? "rgba(245,166,35,.35)" : "rgba(201,164,107,.45)"; ctx.fill(); ctx.strokeStyle = s.lane ? "#f5a623" : "#c9a46b"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = s.kind === "lane" ? "rgba(245,166,35,.35)" : s.kind === "branch" ? "rgba(230,237,243,.25)" : "rgba(201,164,107,.45)"; ctx.fill();
+    ctx.strokeStyle = s.kind === "lane" ? "#f5a623" : s.kind === "branch" ? "#e6edf3" : "#c9a46b"; ctx.lineWidth = 1; ctx.stroke();
     if (nums) { ctx.fillStyle = "#e6edf3"; ctx.font = `${Math.min(12, rp * 0.9) | 0}px system-ui`; ctx.textAlign = "center"; ctx.fillText(s.order, X, Y + 4); ctx.textAlign = "left"; }
     else { ctx.fillStyle = "#e6edf3"; ctx.beginPath(); ctx.arc(X, Y, 1.5, 0, 7); ctx.fill(); }
   }
@@ -1323,8 +1420,10 @@ function draw4() {
 }
 
 $("sweep").oninput = () => { S.sweep = +$("sweep").value; $("sweepVal").textContent = S.sweep + "°"; };
-$("sweep").onchange = () => { S.sweep = +$("sweep").value; saveSession(); run4(); };
-$("bestAngle").onclick = () => { S.sweep = null; run4(); saveSession(); };
+$("sweep").onchange = () => { S.sweep = +$("sweep").value; saveSession(); update3(); };
+$("bestAngle").onclick = () => { S.sweep = bestSweep(S.safe.filter(p => area(p) > 0)); saveSession(); update3(); };
+$("alignEntry").onclick = () => { S.sweep = sweepAlongEntry(); saveSession(); update3(); };
+$("rowsIn").onchange = () => { S.rows = Math.max(1, +$("rowsIn").value || 3); saveSession(); update3(); };
 $("showNums").onchange = draw;
 $("laneW").onchange = () => { const v = parseFloat($("laneW").value); S.laneW = v > 0 ? v : null; saveSession(); render2(); };
 $("toR4").onclick = () => setRound(4);
@@ -1370,7 +1469,7 @@ function newSim(method, cfg) {
   };
   W.maxIn = cfg.maxIn > 0 ? cfg.maxIn : Math.max(1, R.zones.length);
   buildRouteGrid(W);
-  if (method === "grid") W.baseSpots = R.grids[smallest.id].spots.map(s => ({ c: s.p, kind: s.lane ? "lane" : "zone", order: s.order }));
+  if (method === "grid") W.baseSpots = R.grids[smallest.id].spots.map(s => ({ c: s.p, kind: s.kind || (s.lane ? "lane" : "zone"), order: s.order }));
   if (method === "base") W.baseSpots = fixedSpots(W);
   return W;
 }
@@ -1381,10 +1480,11 @@ const gapOf = (W, a, b) => (a.gap + b.gap) / 2;
 // centre regions for a pile of radius r: zone spots (safe zone minus lane, circle inside area and clear of lane), lane spots
 function regions(W, r) {
   const key = r.toFixed(3); if (W.regionCache.has(key)) return W.regionCache.get(key);
-  const inner = pieces(offsetPaths([S.poly], -r)), laneBuf = offsetPaths(W.lane.poly, r);
-  const zoneR = pieces(clip(clip(W.R.region, inner, CT().ctIntersection), laneBuf, CT().ctDifference));
+  const inner = pieces(offsetPaths([S.poly], -r)), laneBuf = offsetPaths(W.lane.poly, r), brBuf = W.R.branches && W.R.branches.length ? offsetPaths(W.R.branches, r) : [];
+  const zoneR = pieces(clip(clip(W.R.region, inner, CT().ctIntersection), [...laneBuf, ...brBuf], CT().ctDifference));   // circle clear of spine and branches
+  const branchR = W.R.branchSafe && W.R.branchSafe.length ? pieces(clip(clip(W.R.branchSafe, inner, CT().ctIntersection), laneBuf, CT().ctDifference)) : [];
   const laneR = pieces(clip(W.R.laneSafe, inner, CT().ctIntersection));
-  const v = { zoneR, laneR }; W.regionCache.set(key, v); return v;
+  const v = { zoneR, branchR, laneR }; W.regionCache.set(key, v); return v;
 }
 function zoneOf(W, c) {
   let best = null, bd = Infinity;
@@ -1396,7 +1496,7 @@ function zoneOf(W, c) {
 function fixedSpots(W) {
   const s = 2 * W.rmax + 7.38, reg = regions(W, W.rmax), out = [], b = bounds(S.poly);
   for (let x = b[0] + s / 2; x < b[2]; x += s) for (let y = b[1] + s / 2; y < b[3]; y += s) {
-    const c = [x, y]; if (inPolys(c, reg.zoneR, 0)) out.push({ c, kind: "zone" }); else if (inPolys(c, reg.laneR, 0)) out.push({ c, kind: "lane" });
+    const c = [x, y]; if (inPolys(c, reg.zoneR, 0)) out.push({ c, kind: "zone" }); else if (inPolys(c, reg.branchR, 0)) out.push({ c, kind: "branch" }); else if (inPolys(c, reg.laneR, 0)) out.push({ c, kind: "lane" });
   }
   return out;
 }
@@ -1434,7 +1534,7 @@ function buildRouteGrid(W) {
   // gate cells: lane cells closest to the entry
   G.inStart = []; G.outEnd = [];
   for (let k = 0; k < nx * ny; k++) if (G.base[k] && G.side[k] && G.depth[k] < cs * 2.5 && G.core[k]) (G.side[k] < 0 ? G.inStart : G.outEnd).push(k);
-  W.G = G; refreshReach(W);
+  W.G = G; refreshReach(W); reachMaps(W);
 }
 const cellXY = (G, k) => [G.x0 + (k % G.nx) * G.cs, G.y0 + Math.floor(k / G.nx) * G.cs];
 const cellAt = (G, p) => { const i = Math.round((p[0] - G.x0) / G.cs), j = Math.round((p[1] - G.y0) / G.cs); return i < 0 || j < 0 || i >= G.nx || j >= G.ny ? -1 : j * G.nx + i; };
@@ -1450,6 +1550,12 @@ function blockAround(W, q) {   // a new pile blocks the cells a truck centre can
     if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i, c = cellXY(G, k);
     if (Math.hypot(c[0] - q.p[0], c[1] - q.p[1]) < R) G.free[k] = 0; }
 }
+function reachMaps(W) {   // distance maps from the gate (in) and to the exit (out), recomputed only when stale
+  const G = W.G, key = W.piles.length + "|" + W.minLaneDepth; if (G.reachVer === key) return;   // only piles change the free ground
+  G.reachVer = key;
+  G.distIn = bfs(G, G.inStart, k => G.free[k], G.mvIn);
+  G.distOut = bfs(G, G.outEnd, k => G.free[k], G.mvOut);
+}
 function refreshReach(W) {
   const G = W.G, N = G.nx * G.ny;
   if (!G.free) { G.free = new Uint8Array(N); for (let k = 0; k < N; k++) if (G.base[k] && !blockedByPile(W, cellXY(G, k))) G.free[k] = 1; }
@@ -1462,8 +1568,7 @@ function refreshReach(W) {
     if (G.side[n2] === other) return lateral(k, n2);                // the other lane: cross it, never drive along it
     return true; };
   G.mvIn = (k, n2) => cross(k, n2, 1); G.mvOut = (k, n2) => cross(k, n2, -1);
-  G.distIn = bfs(G, G.inStart, k => G.free[k], G.mvIn);
-  G.distOut = bfs(G, G.outEnd, k => G.free[k], G.mvOut);
+  G.reachVer = -1;
 }
 function bfs(G, starts, ok, okMove = () => true) {
   const d = new Int32Array(G.nx * G.ny).fill(-1), q = []; for (const s of starts) if (ok(s)) { d[s] = 0; q.push(s); }
@@ -1481,40 +1586,42 @@ function traceWith(G, dist, mv, k) { const out = [cellXY(G, k)]; let cur = k, gu
     if (best === cur) break; cur = best; out.push(cellXY(G, cur)); }
   return out; }
 // stop cell for a pile at c: a free cell next to the pile, reachable going in and coming out
-function stopCell(W, c, r, Wt, zoneSpot = true) {
+function stopCell(W, c, r, Wt, zoneSpot = true, exact = false) {
+  if (exact) reachMaps(W);
   const G = W.G, R = r + Wt / 2, n = Math.ceil((R + 2 * G.cs) / G.cs), ci = Math.round((c[0] - G.x0) / G.cs), cj = Math.round((c[1] - G.y0) / G.cs);
   let best = -1, bs = Infinity;
   for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) {
     if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i;
-    if (G.distIn[k] < 0 || G.distOut[k] < 0 || (zoneSpot && G.need[k])) continue;
+    if (!G.free[k] || (zoneSpot && G.need[k]) || (exact && (G.distIn[k] < 0 || G.distOut[k] < 0))) continue;
     const d = Math.hypot(G.x0 + i * G.cs - c[0], G.y0 + j * G.cs - c[1]); if (d < R || d > R + 1.6 * G.cs) continue;
-    const s = d + G.distIn[k] * 0.01; if (s < bs) { bs = s; best = k; }
+    if (d < bs) { bs = d; best = k; }
   }
   return best;
 }
 
 // ---------------------------------------------------------------- the dispatcher
-function checkSpot(W, ty, c, kind, pre = false) {
+function checkSpot(W, ty, c, kind, pre = false, zz = null) {
   const r = ty.r, reg = regions(W, r);
   for (const q of W.hash.near(c, r + W.rmax + W.gmax)) if (Math.hypot(q.p[0] - c[0], q.p[1] - c[1]) < r + q.r + gapOf(W, ty, q.ty) - 1e-3) return "overlap";
-  if (!pre && !inPolys(c, kind === "zone" ? reg.zoneR : reg.laneR)) return "region";
-  const z = kind === "lane" ? "L" : zoneOf(W, c);
+  if (!pre && !inPolys(c, kind === "zone" ? reg.zoneR : kind === "branch" ? reg.branchR : reg.laneR)) return "region";
+  const z = zz ?? (kind === "lane" ? "L" : zoneOf(W, c));
   if (W.locked.has(z)) return "locked";                                                    // Rule 2: zone locking
   const dep = depthOf(c, W.F);
   if (kind === "zone") { if (W.minLaneDepth <= dep + r) return "lane"; }
+  else if (kind === "branch") { if (W.minLaneDepth <= dep + r) return "lane"; if (zoneHasSpot(W, z)) return "zone first"; }   // branch fills after its zone, like water rising
   else {
     if (W.trucks.length) return "busy";                                                   // last phase: lane spots one truck at a time
     if (deepestZone(W) > dep) return "zone deeper";
   }
-  const sc = stopCell(W, c, r, W.Wmax, kind === "zone"); if (sc < 0) return "unreachable";
+  const sc = stopCell(W, c, r, W.Wmax, kind === "zone", true); if (sc < 0) return "unreachable";   // reach maps: one search per change, not per spot
   return { zone: z, stop: sc };
 }
 // cells (outside the lanes) a truck body passes over along a path
 function routeCells(W, path) {
   const G = W.G, n = Math.ceil(W.Wmax / 2 / G.cs), out = new Set();
-  for (const p of path) { const k = cellAt(G, p); if (k < 0 || G.side[k]) continue;    // driving along a lane is covered by Rule 1 + give-way
+  for (const p of path) { const k = cellAt(G, p); if (k < 0 || !G.base[k] || G.side[k] || G.depth[k] < 3 * G.cs) continue;    // lane cells and the gate mouth: covered by the lane mutex
     const ci = k % G.nx, cj = (k / G.nx) | 0;
-    for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const q = j * G.nx + i; if (G.base[q] && !G.side[q]) out.add(q); } }
+    for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const q = j * G.nx + i; if (G.base[q] && !G.side[q] && G.depth[q] >= 3 * G.cs) out.add(q); } }
   return out;
 }
 function densify(path, step) {
@@ -1523,9 +1630,48 @@ function densify(path, step) {
     for (let k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); }
   return out;
 }
+// does zone z still have a free, reachable pile spot (smallest truck)? cached until something changes
+function zoneHasSpot(W, z) {
+  const key = W.version + "|" + W.piles.length; if (!W._zh || W._zh.key !== key) W._zh = { key, m: new Map() };
+  if (W._zh.m.has(z)) return W._zh.m.get(z);
+  const o = findSpot(W, W.smallest, { kind: "zone", quick: true, zone: z }); W._zh.m.set(z, !!o); return !!o;
+}
+// Isolation check (Step 4): with this footprint blocked, how much free ground can no longer be reached from the gate?
+// More than a pile-plus-truck pocket means the pile would seal off usable space -> try another spot.
+function cutsOff(W, foot) {
+  reachMaps(W); const G = W.G;
+  const saved = foot.map(k => G.free[k]); foot.forEach(k => G.free[k] = 0);
+  const d = bfs(G, G.inStart, k => G.free[k], G.mvIn);
+  foot.forEach((k, i) => G.free[k] = saved[i]);
+  const footSet = new Set(foot), cut = new Set();
+  for (let k = 0; k < d.length; k++) if (G.distIn[k] >= 0 && d[k] < 0 && !footSet.has(k)) cut.add(k);
+  if (cut.size <= Math.PI * (W.smallest.r + W.Wmax) ** 2 / (G.cs * G.cs)) return false;   // pocket too small for any pile + truck
+  // a bigger cut-off region only matters if some free pile spot could still be served from it
+  const ty = W.smallest, C = W.cc && W.cc.get(ty.id); if (!C) return true;
+  const R = ty.r + W.Wmax / 2, n = Math.ceil((R + 2 * G.cs) / G.cs);
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (const k of cut) { const p = cellXY(G, k); bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); }
+  const m = R + 3 * G.cs;
+  for (const o of C.list) {
+    if (o.dead || o.kind === "lane" || o.c[0] < bx0 - m || o.c[0] > bx1 + m || o.c[1] < by0 - m || o.c[1] > by1 + m) continue;
+    const ci = Math.round((o.c[0] - G.x0) / G.cs), cj = Math.round((o.c[1] - G.y0) / G.cs);
+    let near = false;
+    for (let j = cj - n; j <= cj + n && !near; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; if (cut.has(j * G.nx + i)) { near = true; break; } }
+    if (!near) continue;
+    if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
+    return true;                                                       // a usable spot would be sealed off
+  }
+  return false;
+}
 function deepestZone(W) {
   const key = W.version + "|" + W.piles.length; if (W._dz && W._dz.key === key) return W._dz.v;
-  const o = findSpot(W, W.smallest, { kind: "zone", quick: true }); W._dz = { key, v: o ? o.depth : -Infinity }; return W._dz.v;
+  const o = findSpot(W, W.smallest, { kind: "zone", quick: true }), ob = findSpot(W, W.smallest, { kind: "branch", quick: true });
+  W._dz = { key, v: Math.max(o ? o.depth : -Infinity, ob ? ob.depth : -Infinity) }; return W._dz.v;
+}
+function sortKeys(W, o) {
+  o.depth = depthOf(o.c, W.F); o.lat = Math.abs(latOf(W, o.c)); o.z = o.kind === "lane" ? "L" : zoneOf(W, o.c);
+  const z = o.kind === "branch" ? W.R.zones.find(q => q.n === o.z) : null;
+  o.sd = z && z.dc != null ? z.dc : o.depth;          // all spots of a branch share one depth: far end first along the whole road
 }
 function candidates(W, ty, opts) {
   W.cc ??= new Map();
@@ -1533,18 +1679,18 @@ function candidates(W, ty, opts) {
   if (!C) {
     let list;
     if (W.method === "touch") list = touchStatic(W, ty);
-    else { const reg = regions(W, ty.r); list = W.baseSpots.filter(s => inPolys(s.c, s.kind === "zone" ? reg.zoneR : reg.laneR)).map(s => ({ c: s.c, kind: s.kind, order: s.order })); }
-    list.forEach(o => { o.depth = depthOf(o.c, W.F); o.lat = Math.abs(latOf(W, o.c)); });
+    else { const reg = regions(W, ty.r); list = W.baseSpots.filter(s => inPolys(s.c, s.kind === "zone" ? reg.zoneR : s.kind === "branch" ? reg.branchR : reg.laneR)).map(s => ({ c: s.c, kind: s.kind, order: s.order })); }
+    list.forEach(o => sortKeys(W, o));
     C = { list, n: 0, dirty: true }; W.cc.set(ty.id, C);
   }
   if (C.n < W.piles.length) {                                   // piles never move: update only around the new ones
     const fresh = W.piles.slice(C.n); C.n = W.piles.length;
     C.list = C.list.filter(o => fresh.every(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) >= ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3));
-    if (W.method === "touch") { const add = touchAround(W, ty, fresh); add.forEach(o => { o.depth = depthOf(o.c, W.F); o.lat = Math.abs(latOf(W, o.c)); }); C.list.push(...add); C.dirty = true; }
+    if (W.method === "touch") { const add = touchAround(W, ty, fresh); add.forEach(o => sortKeys(W, o)); C.list.push(...add); C.dirty = true; }
   }
   if (C.dirty) {
     if (W.method === "grid") C.list.sort((a, b) => a.order - b.order);
-    else { const q = ty.r * 0.1; C.list.sort((a, b) => Math.round(b.depth / q) - Math.round(a.depth / q) || b.lat - a.lat); }   // deepest first, then farthest from the lane
+    else { const q = ty.r * 0.1; C.list.sort((a, b) => Math.round(b.sd / q) - Math.round(a.sd / q) || b.lat - a.lat); }   // deepest first, then farthest from the spine
     C.dirty = false;
   }
   let list = C.list;
@@ -1553,32 +1699,42 @@ function candidates(W, ty, opts) {
   return list;
 }
 function findSpot(W, ty, opts = {}) {
-  let busy = 0;
+  let busy = 0; const jammed = new Set();      // zones whose access route is taken right now: skip their other spots
+
   for (const o of candidates(W, ty, opts)) {
+    if (o.dead) continue;                     // proved impossible earlier (piles only ever add, so it stays impossible)
     if (opts.quick) { // used by the lane rule: is there still any free, reachable zone spot deeper?
+      if (opts.zone != null && o.z !== opts.zone) continue;
       if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
-      if (stopCell(W, o.c, ty.r, W.Wmax) < 0) continue;
+      if (stopCell(W, o.c, ty.r, W.Wmax, true, true) < 0) continue;
       return o;
     }
-    const res = checkSpot(W, ty, o.c, o.kind, true);
+    if (W.locked.has(o.z) || jammed.has(o.z)) continue;                 // locked / jammed zone: skip cheaply
+    const res = checkSpot(W, ty, o.c, o.kind, true, o.z);
     if (typeof res === "object") {
       // route lock (extends Rule 2): the truck's route outside the lanes must not cross a route reserved by another truck
       // isolation check (Step 4): the new pile must not land on another truck's reserved route,
       // and this truck must still have a way out once its own pile is down
       const foot = footprint(W, o.c, ty.r);
       if (foot.some(k => W.resv.has(k)) || W.resv.has(res.stop)) continue;            // cheap rejections: no route search needed
-      if (++busy > 30) return null;                                                    // limit the expensive route searches
-      const pin = densify(routeIn(W, res.stop), W.G.cs);
+      // cheap pre-check: the straight line from the spine to the stop must not run through another truck's reserved route
+      { const lp = laneAt(W, -1, depthOf(cellXY(W.G, res.stop), W.F)), sp = cellXY(W.G, res.stop); let hit = false;
+        for (let t = 0.15; t <= 1 && !hit; t += 0.1) { const k = cellAt(W.G, [lp[0] + (sp[0] - lp[0]) * t, lp[1] + (sp[1] - lp[1]) * t]); if (k >= 0 && W.resv.has(k)) hit = true; }
+        if (hit) { jammed.add(o.z); continue; } }
+      if (++busy > 12) { W.capped = true; return null; }                              // limit the expensive route searches (retry soon)
+      const pin0 = routeIn(W, res.stop); if (!pin0) { W.stats.skipped++; o.dead = true; continue; }
+      const pin = densify(pin0, W.G.cs);
       const saved = foot.map(k => W.G.free[k]); foot.forEach(k => W.G.free[k] = 0);
       const ro = routeOut(W, res.stop);
       foot.forEach((k, i) => W.G.free[k] = saved[i]);
-      if (!ro) { W.stats.skipped++; continue; }
+      if (!ro) { W.stats.skipped++; o.dead = true; continue; }
       const pout = densify(ro.path.slice(0, ro.laneIdx + 1), W.G.cs);
       const cells = routeCells(W, [...pin, ...pout]);
-      if ([...cells].some(k => W.resv.has(k))) continue;
+      if ([...cells].some(k => W.resv.has(k))) { jammed.add(o.z); continue; }
+      if (cutsOff(W, foot)) { W.stats.isolation = (W.stats.isolation || 0) + 1; continue; }
       return Object.assign(o, res, { pin, cells, ro });
     }
-    if (res === "unreachable") W.stats.skipped++;
+    if (res === "unreachable") { W.stats.skipped++; o.dead = true; }
   }
   return null;
 }
@@ -1586,13 +1742,14 @@ function findSpot(W, ty, opts = {}) {
 function touchStatic(W, ty) {
   const reg = regions(W, ty.r), out = [];
   for (const p of reg.zoneR) for (const v of p) out.push({ c: v, kind: "zone" });
+  for (const p of reg.branchR) for (const v of p) out.push({ c: v, kind: "branch" });
   for (const p of reg.laneR) for (const v of p) out.push({ c: v, kind: "lane" });
   return out;
 }
 function touchAround(W, ty, fresh) {
   const r = ty.r, reg = regions(W, r), out = [];
-  const polys = [...reg.zoneR.map(p => ({ p, kind: "zone" })), ...reg.laneR.map(p => ({ p, kind: "lane" }))];
-  const kindAt = c => inPolys(c, reg.zoneR) ? "zone" : inPolys(c, reg.laneR) ? "lane" : null;
+  const polys = [...reg.zoneR.map(p => ({ p, kind: "zone" })), ...reg.branchR.map(p => ({ p, kind: "branch" })), ...reg.laneR.map(p => ({ p, kind: "lane" }))];
+  const kindAt = c => inPolys(c, reg.zoneR) ? "zone" : inPolys(c, reg.branchR) ? "branch" : inPolys(c, reg.laneR) ? "lane" : null;
   for (const A of fresh) {
     const RA = r + A.r + gapOf(W, ty, A.ty);
     for (const B of W.hash.near(A.p, RA + r + W.rmax + W.gmax)) {
@@ -1622,6 +1779,7 @@ function release(W, ty) {
   const tr = { id: ++W.tid, ty, spot: pile, phase: "in", wait: 0, stop: o.stop, born: W.t };
   W.version++; refreshReach(W);
   tr.path = o.pin; tr.cells = o.cells; tr.ro = o.ro; for (const k of o.cells) W.resv.set(k, tr.id);
+  haloAdd(W, o.cells, 1);
   tr.pos = tr.path[0].slice(); tr.wp = 1; tr.heading = Math.atan2(W.F.n[1], W.F.n[0]);
   W.trucks.push(tr); return tr;
 }
@@ -1635,31 +1793,55 @@ function nearestFree(W, p, side) { const G = W.G; let best = -1, bd = Infinity;
     if (!G.free[k] || (side && G.core[k] !== side)) continue; const c = cellXY(G, k), d = Math.hypot(c[0] - p[0], c[1] - p[1]); if (d < bd) { bd = d; best = k; } }
   return best; }
 // IN: gate -> along the IN lane to the spot's depth -> turn in to the stop cell
+// A* on the route grid (8 neighbours, octile distance): fast for big areas, explores toward the goal only
+function astar(G, start, goal, ok, mv) {
+  const N = G.nx * G.ny;
+  if (!G.as || G.as.N !== N) G.as = { N, g: new Float32Array(N), from: new Int32Array(N), stamp: new Uint32Array(N), shut: new Uint32Array(N), gen: 0, hk: new Int32Array(N * 4), hf: new Float32Array(N * 4) };
+  const A = G.as, gen = ++A.gen, gx = goal % G.nx, gy = (goal / G.nx) | 0, hk = A.hk, hf = A.hf; let hn = 0;
+  const h = k => { const dx = Math.abs(k % G.nx - gx), dy = Math.abs(((k / G.nx) | 0) - gy); return Math.max(dx, dy) + 0.4142 * Math.min(dx, dy); };
+  const push = (f, k) => { if (hn >= hk.length) return; let i = hn++; while (i) { const p = (i - 1) >> 1; if (hf[p] <= f) break; hf[i] = hf[p]; hk[i] = hk[p]; i = p; } hf[i] = f; hk[i] = k; };
+  const pop = () => { const top = hk[0], lf = hf[--hn], lk = hk[hn]; let i = 0;
+    for (;;) { const l = 2 * i + 1; if (l >= hn) break; const r = l + 1, m = r < hn && hf[r] < hf[l] ? r : l; if (hf[m] >= lf) break; hf[i] = hf[m]; hk[i] = hk[m]; i = m; }
+    hf[i] = lf; hk[i] = lk; return top; };
+  A.stamp[start] = gen; A.g[start] = 0; A.from[start] = -1; push(h(start), start);
+  while (hn) {
+    const k = pop(); if (A.shut[k] === gen) continue; A.shut[k] = gen;
+    if (k === goal) { const out = []; for (let c = k; c >= 0; c = A.from[c]) out.push(cellXY(G, c)); return out.reverse(); }
+    const i = k % G.nx, j = (k / G.nx) | 0;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue; const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= G.nx || jj >= G.ny) continue;
+      const n = jj * G.nx + ii; if (A.shut[n] === gen || !(ok(n) || n === goal) || !mv(k, n)) continue;
+      const g = A.g[k] + (di && dj ? 1.4142 : 1);
+      if (A.stamp[n] !== gen || g < A.g[n]) { A.stamp[n] = gen; A.g[n] = g; A.from[n] = k; push(g + h(n), n); }
+    }
+  }
+  return null;
+}
 function routeIn(W, stop) {
   const G = W.G, d = depthOf(cellXY(G, stop), W.F), gate = laneAt(W, -1, 0).map((v, i) => v - W.F.n[i] * 25);
   for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
     const k0 = nearestFree(W, laneAt(W, -1, dd), -1); if (k0 < 0) continue;
-    const dist = bfs(G, [k0], k => G.free[k], G.mvIn); if (dist[stop] < 0) continue;
-    const tail = traceWith(G, dist, G.mvIn, stop).reverse();
+    const tail = astar(G, k0, stop, k => routeOk(W, k), G.mvIn); if (!tail) continue;
     return [gate, ...lanePath(W, -1, k0), ...tail.slice(1)];
   }
-  return [gate, ...trace(G, G.distIn, stop).reverse()];
+  return null;                                                          // not reachable now
 }
 // path inside one lane half, from the entry end to cell k (follows the lane even where the shape cuts into it)
 function lanePath(W, side, k) {
   const G = W.G, starts = side < 0 ? G.inStart : G.outEnd;
-  const own = side < 0 ? 1 : 2;
-  const dist = bfs(G, starts.filter(q => G.core[q] === side), q => (G.core[q] === side || q === k) && (G.free[q] || q === k));
+  const key = side + "|" + W.minLaneDepth; W._lp ??= {};
+  if (!W._lp[key]) W._lp[key] = bfs(G, starts.filter(q => G.core[q] === side), q => G.core[q] === side && G.free[q]);
+  const dist = W._lp[key];
+  if (dist[k] < 0) { const k2 = nearestFree(W, cellXY(G, k), side); if (k2 >= 0 && dist[k2] >= 0) return [...traceWith(G, dist, () => true, k2).reverse(), cellXY(G, k)]; }
   if (dist[k] < 0) return [laneAt(W, side, 0), cellXY(G, k)];
   return traceWith(G, dist, () => true, k).reverse();
 }
 // OUT: stop -> to the OUT lane at the same depth -> along the OUT lane to the exit
 function routeOut(W, from) {
   const G = W.G, d = depthOf(cellXY(G, from), W.F), exit = laneAt(W, 1, 0).map((v, i) => v - W.F.n[i] * 25);
-  const dist = bfs(G, [from], k => G.free[k] || k === from, G.mvOut);   // the truck's own cell is always usable
   for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
-    const k1 = nearestFree(W, laneAt(W, 1, dd), 1); if (k1 < 0 || dist[k1] < 0) continue;
-    const head = traceWith(G, dist, G.mvOut, k1).reverse();
+    const k1 = nearestFree(W, laneAt(W, 1, dd), 1); if (k1 < 0) continue;
+    const head = astar(G, from, k1, k => routeOk(W, k) || k === from, G.mvOut); if (!head) continue;   // the truck's own cell is always usable
     return { path: [...head, ...lanePath(W, 1, k1).reverse().slice(1), exit], laneIdx: head.length - 1 };
   }
   return null;                                                           // no way out right now: wait and retry
@@ -1675,9 +1857,10 @@ function stepSim(W, dt) {
     W.nextArrival += cfg.every * (0.7 + 0.6 * W.rand());
   }
   // gate (Rule 3): enter only if fewer than maxIn inside, with a headway
-  if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway && W.failVer !== W.version + ":" + W.queue[0].ty.id) {
+  if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway && W.failVer !== W.version + ":" + W.queue[0].ty.id && W.failVer !== "retry@" + Math.floor(W.t / 30)) {
+    W.capped = false;
     const q = W.queue[0], tr = release(W, q.ty);
-    if (!tr) W.failVer = W.version + ":" + q.ty.id;
+    if (!tr) W.failVer = W.capped ? "retry@" + Math.floor(W.t / 30) : W.version + ":" + q.ty.id;   // a capped search is retried every 30 s
     if (tr) { W.queue.shift(); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); }
     else if (!W.trucks.length) {                                   // nothing inside and still no spot: this truck size cannot fit any more
       W.full.add(q.ty.id); W.queue = W.queue.filter(z => { if (z.ty.id === q.ty.id) { W.stats.turnedAway++; return false; } return true; });
@@ -1735,7 +1918,9 @@ function stepSim(W, dt) {
 // Lane mutex: the lanes plus a safety strip beside them ("need" cells) may hold only one MOVING truck at a time.
 // The holder never waits for anyone (its lane path is empty, its route outside the lanes is reserved),
 // so it always gets through and hands the lanes on: no collision and no circular wait is possible.
-const needAt = (W, p) => { const k = cellAt(W.G, p); return k >= 0 ? W.G.need[k] : 0; };
+const needAt = (W, p) => { const k = cellAt(W.G, p), d = depthOf(p, W.F);
+  if (k < 0 || !W.G.base[k]) return d > -24 && d < 3 * W.G.cs ? 1 : 0;      // the gate mouth (between the gate point and the lane) belongs to the lanes
+  return W.G.need[k]; };
 function laneOk(W, tr, p) {
   if (!needAt(W, p)) return true;
   if (W.mutex && W.mutex !== tr) return false;
@@ -1746,7 +1931,15 @@ function releaseLanes(W, tr) {
   const next = tr.path[tr.wp];
   if (!needAt(W, tr.pos) && (!next || !needAt(W, next))) W.mutex = null;
 }
-function freeRoute(W, tr) { for (const k of tr.cells || []) if (W.resv.get(k) === tr.id) W.resv.delete(k); }
+function freeRoute(W, tr) { if (tr.cells && !tr.haloFreed) { haloAdd(W, tr.cells, -1); tr.haloFreed = true; } for (const k of tr.cells || []) if (W.resv.get(k) === tr.id) W.resv.delete(k); }
+function haloAdd(W, cells, sgn) {
+  const G = W.G; if (!W.halo) W.halo = new Int16Array(G.nx * G.ny);
+  const n = Math.ceil(W.Wmax / 2 / G.cs);
+  for (const k of cells) { const ci = k % G.nx, cj = (k / G.nx) | 0;
+    for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; W.halo[j * G.nx + i] += sgn; } }
+}
+// a route may use a cell if it is free ground and not within half a truck of another truck's reserved route (lanes are handled by the lane mutex)
+const routeOk = (W, k) => W.G.free[k] && (W.G.side[k] || W.G.depth[k] < 3 * W.G.cs || !W.halo || W.halo[k] <= 0);
 // is truck o on the next stretch of tr's actual route (its length + 4 m ahead)?
 function inMyWay(tr, o) {
   if (!tr.path || tr.wp >= tr.path.length || tr.phase === "man" || tr.phase === "dump") return false;
@@ -1768,10 +1961,18 @@ function blocksBack(o, tr) { const hd = Math.atan2(o.path[o.wp]?.[1] - o.pos[1],
 
 function simCoverage(W, placedOnly = true) {
   const ps = W.piles.filter(q => !placedOnly || q.state === "placed"); if (!ps.length) return 0;
+  // spacing >= 0: circles never overlap and lie inside the area, so the union is just the sum
+  if (W.types.every(t => t.gap >= 0)) return ps.reduce((s, q) => s + Math.PI * q.r * q.r, 0) / Math.abs(area(S.poly)) * 100;
   const circles = ps.map(q => Array.from({ length: 28 }, (_, k) => [q.p[0] + q.r * Math.cos(k * Math.PI / 14), q.p[1] + q.r * Math.sin(k * Math.PI / 14)]));
   return sumArea(clip(clip(circles, [], CT().ctUnion), [S.poly], CT().ctIntersection)) / Math.abs(area(S.poly)) * 100;
 }
-function runToEnd(W, limit = 72 * 3600) { while (!W.done && W.t < limit) stepSim(W, 1); return W; }
+function runToEnd(W, limit = 400 * 3600) { while (!W.done && W.t < limit) stepSim(W, 1); return W; }
+// same, in slices so the page stays responsive on big areas
+function runChunked(W, onProgress, limit = 400 * 3600) {
+  return new Promise(res => { const tick = () => { const t0 = performance.now();
+    while (!W.done && W.t < limit && performance.now() - t0 < 120) stepSim(W, 1);
+    onProgress && onProgress(W); if (W.done || W.t >= limit) res(W); else setTimeout(tick, 0); }; tick(); });
+}
 function simSummary(W) {
   const per = W.types.map(t => `${W.piles.filter(q => q.ty.id === t.id && q.state === "placed").length}`);
   return { piles: W.piles.filter(q => q.state === "placed").length, per, cov: simCoverage(W), hours: (W.fillTime ?? W.t) / 3600, ...W.stats };
@@ -1819,8 +2020,12 @@ function render5() {
 }
 function compareAll() {
   stopSim(); readCfg(); $("cmpBox").innerHTML = '<p class="hint">Running all three methods…</p>';
-  setTimeout(() => {
-    const rows = ["base", "grid", "touch"].map(m => { const W = runToEnd(newSim(m, Object.assign({}, S.simCfg))); return { m, s: simSummary(W), W }; });
+  setTimeout(async () => {
+    const rows = [];
+    for (const m of ["base", "grid", "touch"]) {
+      const W = await runChunked(newSim(m, Object.assign({}, S.simCfg)), w => { $("cmpBox").innerHTML = `<p class="hint">Running ${METHOD_NAMES[m].split(" (")[0]}… ${w.piles.length} piles, site clock ${f(w.t / 3600, 1)} h</p>`; });
+      rows.push({ m, s: simSummary(W), W });
+    }
     const best = Math.max(...rows.map(r => r.s.cov));
     $("cmpBox").innerHTML = `<table class="dims"><tr><td class="n">Method</td><td class="u">piles</td><td class="u">cover %</td><td class="u">hours</td><td class="u">coll.</td><td class="u">dead.</td></tr>${rows.map(r =>
       `<tr${r.s.cov === best ? ' class="sel"' : ""}><td class="n">${METHOD_NAMES[r.m].split(" (")[0]}</td><td>${r.s.piles}</td><td><b>${f(r.s.cov, 1)}</b></td><td>${f(r.s.hours, 1)}</td><td>${r.s.collisions}</td><td>${r.s.deadlocks}</td></tr>`).join("")}</table>
@@ -1832,6 +2037,7 @@ function draw5() {
   if (!SIM) return; const W = SIM;
   for (const L of W.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.08)"; ctx.fill(); }
   W.R.zones.forEach(z => { pathOf(z.poly); ctx.strokeStyle = "#ffffff22"; ctx.lineWidth = 1; ctx.stroke(); });
+  for (const B of W.R.branches || []) { pathOf(B); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#ffffff44"; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); }
   for (const q of W.piles) {
     const [X, Y] = W2S(q.p); ctx.beginPath(); ctx.arc(X, Y, q.r * view.s, 0, Math.PI * 2);
     if (q.state === "placed") { ctx.fillStyle = q.ty.color + "aa"; ctx.fill(); ctx.strokeStyle = q.ty.color; ctx.lineWidth = 1; ctx.stroke(); }
@@ -1850,17 +2056,66 @@ document.querySelectorAll("#methodTabs button").forEach(b => b.onclick = () => {
 document.querySelectorAll("#speedTabs button").forEach(b => b.onclick = () => { simSpeed = +b.dataset.s; render5(); });
 $("playBtn").onclick = () => simTimer ? stopSim() : playSim();
 $("resetBtn").onclick = resetSim;
-$("endBtn").onclick = () => { stopSim(); if (!SIM) resetSim(); runToEnd(SIM); render5(); draw(); };
+$("endBtn").onclick = async () => { stopSim(); if (!SIM) resetSim(); await runChunked(SIM, () => { render5(); draw(); }); render5(); draw(); };
 $("cmpBtn").onclick = compareAll;
 $("toR5").onclick = () => setRound(5);
 
 $("applyCfg").onclick = resetSim;
+
+// =====================================================================================
+// Demo for judges: runs all five rounds on a sample site with a caption at each step
+// =====================================================================================
+SAMPLES.forEach((sm, i) => { const o = document.createElement("option"); o.value = i; o.textContent = sm.name; $("demoSite").append(o); });
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function caption(step, html) { const c = $("caption"); c.hidden = false; c.innerHTML = `<div class="step">${step}</div>${html}`; }
+let demoRunning = false;
+async function runDemo() {
+  if (demoRunning) return; demoRunning = true; $("demoBtn").disabled = true;
+  try {
+    const sm = SAMPLES[+$("demoSite").value];
+    if (!S.fleet.length || !S.fleet.every(t => calc(t).ok)) {
+      S.fleet = [];
+      const a = newTruck(); Object.assign(a, { name: "363 t hauler", payload: 363, count: 2, L: 15.1, W: 9.75 }); S.fleet.push(a);
+      const b = newTruck(); Object.assign(b, { name: "227 t hauler", payload: 227, count: 3, L: 12.9, W: 7.6 }); S.fleet.push(b); saveSession();
+    }
+    setRound(1);
+    caption("Round 1 · Dump area", `A survey sketch of <b>${sm.name}</b> is uploaded. The outline is traced into straight edges and arcs, and the written dimensions are read and matched to what they measure.`);
+    const img = new Image(); await new Promise(r => { img.onload = r; img.src = "test_sketches/" + sm.file + ".png"; });
+    S.sample = sm; analyseImage(img, sm.file + ".png");
+    await sleep(300); if (S.mode === "pick") useSelection();
+    for (let k = 0; k < 200 && /…/.test($("progMsg").textContent); k++) await sleep(250);
+    S.view1 = "sketch"; setViewTab(); fitView(); draw(); await sleep(3500);
+    $("buildBtn").click(); $("areaName").value = sm.name;
+    caption("Round 1 · Real shape", `The shape is rebuilt <b>to real size in metres</b> from the dimensions: ${f(Math.abs(area(S.poly)) / 4046.86, 0)} acres.`);
+    await sleep(3000); $("saveArea").click();
+    caption("Round 2 · Fleet", `Two truck types by <b>payload</b>. Each pile is a 2D circle: radius from the load volume (payload ÷ loose density) as a cone at the angle of repose. ${S.fleet.map(t => `${t.name}: r = ${f(calc(t).r, 2)} m`).join(" · ")}`);
+    await sleep(4000);
+    S.sweep = null; setRound(3);
+    caption("Round 3 · Step 1 + Step 2", `<b>Minkowski erosion</b> shrinks the area by the largest truck margins: the green safe zone is where a truck's centre may go. Then the <b>Boustrophedon sweep</b> cuts it into cells at every critical point, and big cells into <b>bays</b> sized from the trucks (${f(S.part ? S.part.B : 0, 0)} m): ${S.part ? S.part.cells.length : 0} cells, ${S.part ? S.part.bays.length : 0} bays.`);
+    await sleep(6000);
+    setRound(4);
+    const G = S.r4 && S.r4.grids[S.view4];
+    caption("Round 4 · Step 3", `From the entry, a two-way <b>spine</b> runs to the back. Each bay half is a work zone with a temporary <b>branch</b> road. Piles are packed in a <b>hexagonal grid</b> (densest circle packing): ${G ? G.spots.length : 0} spots for the ${S.fleet.find(t => t.id === S.view4).name}. Branches and spine fill last, like water rising.`);
+    await sleep(6500);
+    S.simCfg.method = "touch"; setRound(5); simSpeed = 10;
+    caption("Round 5 · Steps 4 + 5", `Trucks arrive in a random mix. The dispatcher gives each one the deepest free spot that touches existing piles, with <b>zone locking</b>, reserved routes, one-way lanes and an <b>isolation check</b>. Collisions and deadlocks are measured, not assumed.`);
+    playSim(); await sleep(14000); stopSim();
+    caption("Result", `Running all three methods on the same trucks… <b>Baseline</b> = today's fixed spot points 7.38 m apart.`);
+    compareAll();
+    for (let k = 0; k < 2400 && !/Same area/.test($("cmpBox").textContent); k++) await sleep(250);
+    const rows = [...$("cmpBox").querySelectorAll("tr")].slice(1).map(tr => [...tr.children].map(td => td.textContent));
+    caption("Result", rows.map(r => `<b>${r[0]}</b>: ${r[2]} % covered, ${r[1]} piles, ${r[3]} h, collisions ${r[4]}, deadlocks ${r[5]}`).join("<br>"));
+  } finally { demoRunning = false; $("demoBtn").disabled = false; }
+}
+$("demoBtn").onclick = runDemo;
+$("caption").onclick = () => { if (!demoRunning) $("caption").hidden = true; };
 // =====================================================================================
 // Rounds navigation & persistence
 // =====================================================================================
 function setRound(r) {
   if (r >= 2 && !S.areaSaved) return banner("Build and save the dump area in Round 1 first");
   if (r >= 3 && (!S.fleet.length || !S.fleet.every(t => calc(t).ok))) return banner("Complete the fleet in Round 2 first");
+  if (r >= 4) { computeSafe(); if (!S.safe.some(p => area(p) > 0)) { banner("⚠ No safe zone: this area is too small for the fleet. Round 4 and 5 need a bigger area or smaller trucks."); if (S.round < 3) setRound(3); return; } }
   if (r >= 2 && (!S.poly || S.round === 1 && S.areaSaved)) { S.poly = S.areaSaved.polygon; S.entry = S.entry || S.areaSaved.entry; }
   S.round = r;
   document.querySelectorAll(".rounds button[data-round]").forEach(b => {
@@ -1878,12 +2133,12 @@ function setRound(r) {
   if (r !== 5 && typeof stopSim === "function") stopSim();
 }
 document.querySelectorAll(".rounds button[data-round]").forEach(b => b.onclick = () => setRound(+b.dataset.round));
-function saveSession() { store.set("zadp.session", { area: S.areaSaved || null, fleet: S.fleet, arrivals: S.arrivals, sel: S.sel, laneW: S.laneW, sweep: S.sweep, gap: S.gap }); }
+function saveSession() { store.set("zadp.session", { area: S.areaSaved || null, fleet: S.fleet, arrivals: S.arrivals, sel: S.sel, laneW: S.laneW, sweep: S.sweep, gap: S.gap, rows: S.rows }); }
 function loadSession() {
   const d = store.get("zadp.session", null); if (!d) return;
   if (d.fleet) { S.fleet = d.fleet; tid = Math.max(0, ...S.fleet.map(t => t.id)) + 1; S.sel = d.sel; }
   if (d.arrivals) S.arrivals = d.arrivals;
-  if (d.laneW) S.laneW = d.laneW; if (d.sweep != null) S.sweep = d.sweep; if (d.gap) S.gap = d.gap;
+  if (d.laneW) S.laneW = d.laneW; if (d.sweep != null) S.sweep = d.sweep; if (d.gap) S.gap = d.gap; if (d.rows) S.rows = d.rows;
   if (d.area && d.area.polygon) loadRecord(d.area);
 }
 function setLegend() {
@@ -1916,7 +2171,7 @@ function fitView() {
 function setView(minx, miny, maxx, maxy) {
   const r = cv.getBoundingClientRect(), pad = 40;
   view = { minx, miny, maxx, maxy };
-  view.s = Math.min((r.width - 2 * pad) / (maxx - minx), (r.height - 2 * pad) / (maxy - miny));
+  view.s = Math.max(1e-3, Math.min((r.width - 2 * pad) / (maxx - minx), (r.height - 2 * pad) / (maxy - miny)));   // hidden pane: keep positive
   view.ox = (r.width - (maxx - minx) * view.s) / 2; view.oy = (r.height - (maxy - miny) * view.s) / 2;
 }
 const W2S = ([x, y]) => [view.ox + (x - view.minx) * view.s, view.oy + (view.maxy - y) * view.s];
@@ -1961,6 +2216,7 @@ function draw() {
     ctx.beginPath(); for (const q of S.safe) { q.forEach((pt, i) => { const [X, Y] = W2S(pt); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.closePath(); }
     ctx.fillStyle = "rgba(63,182,139,.28)"; ctx.fill("evenodd"); ctx.setLineDash([7, 5]); ctx.strokeStyle = "#3fb68b"; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
   }
+  if (S.round === 3) draw3c();
   if (S.round === 4) draw4();
   if (S.round === 5) draw5();
   // round 1: labels for every edge / arc, in metres
@@ -2053,7 +2309,7 @@ cv.addEventListener("pointerdown", e => {
     if (k) { S.cands[k.i].on = !S.cands[k.i].on; draw(); } return; }
   if (S.mode === "entry" && S.poly && !sketchView()) {
     const ne = nearestEdge(w); S.entry = { i: ne.i, pt: ne.pt }; S.mode = "idle"; setEntryBtns();
-    if (S.round === 3) update3(); else draw(); banner("Entry set ✓"); }
+    if (S.round === 3) update3(); else if (S.round === 4) { S.sweep = sweepAlongEntry(); run4(); } else draw(); banner("Entry set ✓ — spine runs from here"); }
 });
 
 // =====================================================================================
