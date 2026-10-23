@@ -54,6 +54,13 @@
   .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 18px 10px; text-align: center; color: var(--muted); cursor: pointer; }
   .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); }
   .drop b { color: var(--text); }
+  .zlegend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .ztable { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ztable td, .ztable th { padding: 3px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  .ztable th { color: var(--muted); font-weight: 500; }
+  .ztable .bar { height: 6px; background: #0f1419; border-radius: 3px; overflow: hidden; width: 60px; display: inline-block; vertical-align: middle; }
+  .ztable .bar i { display: block; height: 100%; }
+  .zdot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
   .samples { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
   .samples button { padding: 2px; background: #fff; border-radius: 6px; }
   .samples img { width: 100%; height: 42px; object-fit: contain; display: block; }
@@ -237,6 +244,11 @@
         <div class="tabs" id="speedTabs"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="3">3×</button><button data-s="4">4×</button><button data-s="10">10×</button></div>
         <p class="hint">1× = 1 minute of site time per second.</p>
         <div class="stats" id="stats5"></div>
+      </section>
+      <section class="card">
+        <h2>Zones</h2>
+        <div class="zlegend"><span><i class="sw" style="background:#5c6b7a"></i>not started</span><span><i class="sw" style="background:#6cb6ff"></i>in progress</span><span><i class="sw" style="background:#f5a623"></i>truck assigned</span><span><i class="sw" style="background:#3fb68b"></i>dumping</span><span><i class="sw" style="background:#d6c14a"></i>finished</span></div>
+        <table class="ztable" id="zoneTable"></table>
       </section>
       <section class="card">
         <h2>Compare all three</h2>
@@ -2057,6 +2069,8 @@ function render5() {
     ["Method", METHOD_NAMES[W.method]], ["Site clock", `${hh} h ${String(mm).padStart(2, "0")} min`],
     ...W.types.map(t => [`<span style="color:${t.color}">●</span> ${t.name}`, `${placed.filter(q => q.ty.id === t.id).length} piles${W.full.has(t.id) ? " · full" : ""}`]),
     ["Coverage of dump area", `<b>${f(cov5.v, 1)} %</b>`],
+    ...(() => { const B = packingBound(W), ov = W.types.some(t => t.gap < 0), cap = ov ? B.coverable : B.touch;
+      return [["Theoretical max", `${f(cap, 1)} % ${ov ? "(overlap: all coverable ground)" : "(touching circles ≤ 90.7 %)"}`], ["Achieved / max", `<b>${f(cov5.v / cap * 100, 0)} %</b> of the best possible`]]; })(),
     ["Trucks inside / waiting", `${W.trucks.length} / ${W.queue.length}`],
     ["Avg / max wait at gate", `${f(W.stats.released ? W.stats.waitSum / W.stats.released / 60 : 0, 1)} / ${f(W.stats.maxWait / 60, 1)} min`],
     ["Collisions", `<span class="${W.stats.collisions ? "bad" : "ok"}">${W.stats.collisions}</span>`],
@@ -2064,6 +2078,7 @@ function render5() {
     ["Status", W.done ? `<span class="ok">Area full after ${f(W.fillTime / 3600, 1)} h</span>` : "running"],
   ].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
   banner(`${METHOD_NAMES[W.method]} · ${placed.length} piles · ${f(cov5.v, 1)} % covered`);
+  renderZones(W);
 }
 function compareAll() {
   stopSim(); readCfg(); $("cmpBox").innerHTML = '<p class="hint">Running all three methods…</p>';
@@ -2080,10 +2095,55 @@ function compareAll() {
     const sel = rows.find(r => r.m === S.simCfg.method); SIM = sel.W; render5(); draw();
   }, 30);
 }
+
+// ---------------------------------------------------------------- theoretical maximum (upper bound)
+// A pile centre may only be in the safe zone, so the ground piles can ever cover is
+// "safe zone grown by r, cut to the dump area". Equal circles that only touch cover at most
+// pi/(2*sqrt(3)) = 90.69 % of any region (Thue / Fejes Toth). So no method can beat
+//   bound(touching) = 0.9069 * coverable / dump area;   with overlap the cap is coverable / dump area.
+function packingBound(W) {
+  const key = W.R.zones.length + "|" + W.smallest.r; if (W._bound && W._bound.key === key) return W._bound;
+  const A = Math.abs(area(S.poly)), r = W.smallest.r;
+  const cov = sumArea(clip(offsetPaths(S.safe.filter(p => area(p) > 0), r), [S.poly], CT().ctIntersection));
+  W._bound = { key, coverable: cov / A * 100, touch: 0.9069 * cov / A * 100 };
+  return W._bound;
+}
+// ---------------------------------------------------------------- zone status
+const ZSTAT = { idle: ["#5c6b7a", "not started"], prog: ["#6cb6ff", "in progress"], assigned: ["#f5a623", "truck assigned"], dumping: ["#3fb68b", "dumping"], done: ["#d6c14a", "finished"] };
+function zoneStatus(W) {
+  const out = new Map();
+  for (const z of W.R.zones) {
+    const piles = W.piles.filter(q => q.state === "placed" && q.zone === z.n);
+    const pileArea = piles.reduce((s, q) => s + Math.PI * q.r * q.r, 0), cap = 0.9069 * Math.abs(area(z.poly));
+    const tr = W.trucks.find(t => t.spot.zone === z.n && t.phase !== "out");
+    let st = "idle";
+    if (tr) st = tr.phase === "dump" || tr.phase === "man" ? "dumping" : "assigned";
+    else if (piles.length && zoneDone(W, z)) st = "done";
+    else if (piles.length) st = "prog";
+    out.set(z.n, { z, st, piles: piles.length, fill: Math.min(100, pileArea / cap * 100), tr });
+  }
+  return out;
+}
+function zoneDone(W, z) {   // no free spot left for the smallest truck in the zone or its branch (cached until something changes)
+  const key = W.version + "|" + W.piles.length; if (!W._zd || W._zd.key !== key) W._zd = { key, m: new Map() };
+  if (!W._zd.m.has(z.n)) W._zd.m.set(z.n, !zoneHasSpot(W, z.n) && !(z.branch && z.branch.length && findSpot(W, W.smallest, { kind: "branch", quick: true, zone: z.n })));
+  return W._zd.m.get(z.n);
+}
+const PHASE_NAME = { in: "driving in", man: "reversing", dump: "dumping", out: "leaving" };
+function renderZones(W) {
+  const zs = zoneStatus(W); W._zs = zs;
+  $("zoneTable").innerHTML = `<tr><th>Zone</th><th>Status</th><th>Truck</th><th>Piles</th><th>Fill</th></tr>` +
+    [...zs.values()].map(o => { const [col, name] = ZSTAT[o.st];
+      return `<tr><td><b>Z${o.z.n}</b></td><td><span class="zdot" style="background:${col}"></span>${name}</td>
+        <td>${o.tr ? `T${o.tr.id} <span style="color:${o.tr.ty.color}">●</span> ${PHASE_NAME[o.tr.phase] || ""}` : "–"}</td><td>${o.piles}</td>
+        <td><span class="bar"><i style="width:${o.fill.toFixed(0)}%;background:${col}"></i></span> ${o.fill.toFixed(0)}%</td></tr>`; }).join("");
+}
 function draw5() {
   if (!SIM) return; const W = SIM;
   for (const L of W.lane.poly) { pathOf(L); ctx.fillStyle = "rgba(245,166,35,.08)"; ctx.fill(); }
-  W.R.zones.forEach(z => { pathOf(z.poly); ctx.strokeStyle = "#ffffff22"; ctx.lineWidth = 1; ctx.stroke(); });
+  const zs = W._zs || zoneStatus(W);
+  W.R.zones.forEach(z => { const o = zs.get(z.n), col = ZSTAT[o ? o.st : "idle"][0];
+    pathOf(z.poly); ctx.fillStyle = col + "26"; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = o && (o.st === "assigned" || o.st === "dumping") ? 3 : 1.5; ctx.stroke(); });
   drawBranchLines(W.R);
   for (const q of W.piles) {
     const [X, Y] = W2S(q.p); ctx.beginPath(); ctx.arc(X, Y, q.r * view.s, 0, Math.PI * 2);
@@ -2097,6 +2157,11 @@ function draw5() {
     if (tr.phase === "dump") { ctx.fillStyle = "#fff"; ctx.font = "bold 10px system-ui"; ctx.fillText("DUMP", -L / 2, -Wd / 2 - 3); }
     ctx.restore();
   }
+  // zone labels on top: number, status colour, fill %
+  W.R.zones.forEach(z => { const o = zs.get(z.n), col = ZSTAT[o ? o.st : "idle"][0], [X, Y] = W2S(centroidOf(z.poly));
+    label(`Z${z.n} ${o ? o.fill.toFixed(0) : 0}%`, X, Y, col, "#0f1419"); });
+  // truck numbers
+  for (const tr of W.trucks) { const [X, Y] = W2S(tr.pos); label(`T${tr.id}`, X, Y - tr.ty.W * view.s - 6, "#e6edf3", "#0f1419"); }
   if (W.queue.length) { const g = W.R.lane.inLine[0], [X, Y] = W2S([g[0] - W.F.n[0] * 18, g[1] - W.F.n[1] * 18]); label(`${W.queue.length} waiting`, X, Y, "#e5534b", "#fff"); }
 }
 document.querySelectorAll("#methodTabs button").forEach(b => b.onclick = () => { S.simCfg.method = b.dataset.m; resetSim(); });
@@ -2192,7 +2257,7 @@ function setLegend() {
   const sw = (c, t) => `<span><i class="sw" style="background:${c}"></i>${t}</span>`;
   $("legend").style.display = S.round === 2 ? "none" : "flex";
   $("legend").innerHTML = S.round === 5
-    ? (SIM ? SIM.types.map(t => sw(t.color, t.name)).join("") : "") + sw("rgba(245,166,35,.4)", "Lane") + '<span>dashed circle = spot reserved, truck on its way</span>'
+    ? (SIM ? SIM.types.map(t => sw(t.color, t.name + " piles")).join("") : "") + Object.values(ZSTAT).map(([c, n]) => sw(c, n)).join("") + '<span>dashed circle = reserved spot</span>'
     : S.round === 4
     ? sw("var(--area)", "Dump area") + sw("#3fb68b", "Safe zone") + sw("rgba(245,166,35,.6)", "Lane (fills last)") + sw("#c9a46b", "Pile circle") + sw("var(--accent)", "Entry")
     : S.round === 3

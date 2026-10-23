@@ -217,6 +217,29 @@ Straight-edged, curved and "weird" outlines: areas rebuilt from the sketches wit
 
 ---
 
+## 9A. How sure are we that this is the best? (defence of the coverage figure)
+
+A simulation number like "77 %" is only convincing next to the **best that is mathematically possible** on the same area. The tool computes that bound and shows it in Round 5 ("Theoretical max" and "Achieved / max").
+
+**1. The upper bound — no method can beat it.**
+- A pile centre may only be in the safe zone (Step 1), so piles can only ever cover the *coverable ground* C = (safe zone grown by the pile radius) ∩ dump area.
+- Equal circles that only touch can cover at most **π / (2√3) = 90.69 %** of any region (Thue's theorem, proved by Fejes Tóth, 1940s). This is a proof, not a simulation.
+- So for touching piles: **max coverage = 0.9069 × C / dump area.** With overlapping piles the cap is C / dump area.
+
+For the 50-acre valley fill: C = 97.6 % of the area, so the touching bound is **88.5 %**. ZADP reaches **76.9 %**, which is **87 % of the theoretical maximum**.
+
+**2. Why the remaining gap is not a weakness of the method.** The bound assumes an infinite plane. Real areas have edges, curved boundaries and roads, where circles cannot pack perfectly. As a *reachable* reference, Round 4 lays the ideal hexagonal lattice of the smallest truck over the same zones with no traffic at all: about 76 %. The live mixed-fleet dispatcher, with all safety rules, reaches **76.9 %**, matching the ideal static plan.
+
+**3. Nothing usable is left empty.** After a ZADP run, the free spots that could still take a pile add up to about **0.2 %** of the area. Every other part of the gap is safety margin (≈ 6 %) or the unavoidable gaps between round piles.
+
+**4. The only way higher is overlap, which is what humans do.** Human operators place piles closer than their size, so neighbours merge. With a 2 m overlap ZADP reaches **92–94 %**, matching the ~95 % human figure in the problem statement, while keeping 0 collisions and 0 deadlocks.
+
+**5. It is repeatable.** The same area with different truck arrival orders (random seeds) gives results within about ±3 points, and every run records 0 collisions and 0 deadlocks.
+
+**Answer to "why 66 % and not 79 % or 55 %?":** the figure is boxed in from both sides. It cannot exceed the proven geometric cap (88.5 % on this site), and it equals the ideal static hexagonal plan (~76 %) while leaving practically no reachable space unused. Any other method can be scored against the same cap with the same tool.
+
+---
+
 ## 10. How the design evolved (what failed, and why it was changed)
 
 These changes came out of testing and are useful for the paper's discussion:
@@ -242,6 +265,7 @@ These changes came out of testing and are useful for the paper's discussion:
 ## 11. Limitations and future work
 
 - **Open safety case:** on very small areas where a narrow neck sits right at the entry (the dumbbell test), trucks entering and leaving can still meet at the gate mouth; mine-scale sites passed. Fix planned: lock the gate mouth together with the spine.
+- **Round 5 zone panel:** each zone shows its status (not started / in progress / truck assigned / dumping / finished), its truck and what that truck is doing, its pile count and fill %; zones are coloured the same on the map and every truck is labelled T#.
 - **Arrival model:** trucks arrive at a fixed average interval with a random mix; the haul cycle and the real number of trucks are not modelled yet.
 - **2D only:** piles are circles; real piles spread unevenly and settle. Pile height and the dump crest are not modelled.
 - **Grid routing:** truck positions use a grid of about half a truck width; turning circles are not modelled exactly (the truck reverses to its pile from a free cell next to it).
