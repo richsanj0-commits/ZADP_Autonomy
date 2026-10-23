@@ -21,7 +21,7 @@ window.pipe = async (fn, seeds = [7, 11], methods = ["base", "grid", "touch"]) =
   if (!S.fleet.length) testFleet();
   setRound(1); analyseImage(await load("/test_sketches/" + fn + ".png"), fn + ".png");
   await new Promise(z => setTimeout(z, 150)); if (S.mode === "pick") { r.pick = S.cands.length; useSelection(); }
-  for (let k = 0; k < 400 && /…/.test($("progMsg").textContent); k++) await new Promise(z => setTimeout(z, 250));
+  for (let k = 0; k < 400 && !/^(Read \d|No numbers|Could not|The text reader)/.test($("progMsg").textContent); k++) await new Promise(z => setTimeout(z, 250));
   r.segs = S.segs.map(s => s.t === "arc" ? "A" : "L").join("");
   r.read = S.dims.filter(d => d.src === "sketch").map(d => dimName(d).split(" ")[0] + "=" + d.value).join(" ");
   if (!S.dims.some(d => d.value > 0)) { const w = S.dims.find(d => d.kind === "width"); w.value = truth[fn][0]; w.src = "user"; r.note = "width typed"; }
@@ -30,6 +30,7 @@ window.pipe = async (fn, seeds = [7, 11], methods = ["base", "grid", "touch"]) =
   $("areaName").value = fn; $("saveArea").click(); setRound(3);
   r.usable = ($("stats3").innerText.match(/Usable\n([\d.]+)/) || [])[1] + "%";
   S.sweep = null; setRound(4);
+  if (S.r4 && window.useBestEntry) r.best = await bestEntry();
   if (!S.r4 || S.round !== 4) { r.note = "no safe zone (area too small)"; r.r5 = {}; r.totalMs = Math.round(performance.now() - T0); return r; }
   r.zones = S.r4.zones.length + "@" + S.sweep + "°";
   r.r4 = Object.values(S.r4.grids).map(g => g.nZone + "+" + (g.nBranch || 0) + "+" + g.nLane + " (" + g.cov.toFixed(0) + "%)").join(" | ");

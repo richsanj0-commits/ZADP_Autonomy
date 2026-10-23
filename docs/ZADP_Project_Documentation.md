@@ -78,7 +78,7 @@ Tested on circles, rounded rectangles, stadiums, D-shapes, ellipses and mixed ou
 
 ### 4.3 Reading the dimensions
 1. **Find the text labels:** small ink blobs (characters) are grouped into labels; each label's direction is found by principal component analysis (PCA) of its pixels.
-2. **Read each label alone:** the label's own pixels are cut out on a clean white background, turned level (both ways up) and read by Tesseract as a single line. A reading must look like "number + optional unit".
+2. **Read each label alone:** the label's own pixels are cut out on a clean white background, turned level (both ways up) and read by Tesseract as a single line. A reading must look like "number + optional unit". Several readers (one per spare CPU core, up to 4) work on different labels at the same time, and a label read with high confidence (> 85 %) the right way up is not read upside down too — Rounds 1–4 of a sketch now take about 1–2 s.
 3. **Match the number to what it measures:** each number sits on an arrow (dimension) line. The arrow line's drawn length is compared with every possible dimension (each edge, each arc radius, the overall width and height); the closest match wins. Without an arrow line, the number goes to the nearest edge.
 4. **Decimal check:** the reader sometimes drops a decimal point ("1019.1" → "10191"). Each value implies a scale (metres per pixel); a value whose scale is 10×, 100× or 1000× the others is corrected and flagged.
 5. **Ask only for what is missing:** a table lists every needed dimension, marked "read from sketch", "entered" or "needed".
@@ -136,7 +136,7 @@ Small or smooth areas stay as 1–3 cells; large areas (50–200 acres) get many
 
 ## 7. Round 4 — spine, branches and spot points (Step 3)
 
-- **Entry:** the user chooses the side trucks enter from.
+- **Entry:** the user chooses the side trucks enter from, or presses **Best entry**: the current entry and the four longest edges are each tried with their own spine, and the full touching dispatch is run from each; the best run with **0 collisions and 0 deadlocks** is kept. Edges whose straight spine stops short of the far side (< 75 % of the area depth) are skipped. The entry matters: on the 50-acre valley the default edge gave 68.6 %, other long edges 75.5–76.3 %. The Round 4 plan alone is *not* a reliable guide (on the crescent the edge with the best plan gave only 52 % in dispatch), which is why every candidate is simulated.
 - **Spine:** the main road, two one-way lanes (IN and OUT), from the entry straight along the sweep direction to the far boundary.
 - **Work zones:** each bay is split by the spine into two halves; each half is a zone with a temporary **branch** road across its middle (always joined to the spine).
 - **Spot points:** a hexagonal lattice per truck type. Rows are (2r + spacing) apart along a row and (2r + spacing)·√3/2 between rows; every other row is shifted half a step. The phase with most points wins. A spot is kept if its centre is in the zone and its circle is inside the dump area and clear of the spine and branches. Spacing 0 = touching; negative = overlap.
@@ -185,7 +185,9 @@ Routes are found on a grid of truck-centre positions with A*. Spine and branch c
 Both are also **measured**, not assumed: a collision is two truck bodies overlapping; a deadlock is no truck able to move for 10 minutes.
 
 ### 8.5 Settings and output
-Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), a truck every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all three" runs every method on the same truck sequence.
+Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), haul cycle (load + travel to the loader and back, 15 min, ±15 % random), first departures every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all three" runs every method on the same truck sequence.
+
+**Real fleet:** only the trucks entered in Round 2 operate (e.g. 5 × 300 t, 6 × 500 t, 1 × 1000 t = 12 trucks). Each one loops: leaves the loader, joins the gate queue, dumps, drives out, and comes back one haul cycle later. The queue can never hold more trucks than the fleet. The **Trucks** panel lists every truck with its type, state (at the loader / waiting at gate / inside – driving in, reversing, dumping, leaving / parked) and loads delivered. A truck size is "parked" when no spot is left for it; before the run ends every parked size is checked once more, because spots can open again after other piles finish.
 
 **Zone panel:** each zone shows its status (not started · in progress · truck assigned · dumping · finished), its truck and what that truck is doing, its pile count and fill %. Zones are coloured the same way on the map, every truck is labelled T#, and the panel shows the coverage next to the theoretical maximum.
 
@@ -207,6 +209,19 @@ Fleet used in all tests: 363 t hauler (pile r 6.35 m, 15.1 × 9.75 m, 2 trucks) 
 \* measured with the earlier fill order (before the front-advancing order that added about 9 points on the 50- and 80-acre sites); not re-run for time.
 
 **Headline:** with touching piles ZADP fills about **77 %** of the whole dump area (≈ 5× fixed spot points); with the human-like 2 m overlap it reaches **92–94 %**, the human level of ~95 % in the problem statement — with up to 16 trucks working at once and no collision or deadlock.
+
+### 9.1b Real fleet (fixed number of looping trucks) with Best entry
+
+Fleet: **5 × 300 t** (13.5 × 8 m, pile r 5.96 m), **6 × 500 t** (17 × 10 m, r 7.06 m), **1 × 1000 t** (22 × 12 m, r 8.90 m) — 12 trucks, each looping with a 15-min haul cycle. Seed 7, spacing 0 (touching). Entry chosen by **Best entry** (full dispatch runs; the default entry in brackets).
+
+| Site | Baseline (fixed) | Grid + remove | **Touching (ZADP)** | Touching, default entry | Collisions / deadlocks | Fill time |
+|---|---|---|---|---|---|---|
+| Valley fill, 50 acres | 16.9 % | 33.9 % | **76.3 %** | 68.6 % | 0 / 0 | 49 h |
+| Pit-edge crescent, 80 acres | 16.0 % | 33.1 % | **74.6 %** | 73.1 % | 0 / 0 | 95 h |
+| Two lobes + neck, 120 acres | 16.8 % | 34.3 % | **76.5 %** | 67.1 % | 0 / 0 | 173 h |
+| Waste dump with notch, 150 acres | 17.4 % | 34.8 % | **76.7 %** | 70.4 % | 0 / 0 | 175 h |
+
+With a real fleet ZADP fills **75–77 %** of every site (about 4.5× fixed spot points and 2.2× a grid with removal), with no collision or deadlock. The entry choice alone is worth up to 9 points. Two fixes made this possible: a truck size marked "full" is re-checked before the run ends (the spine spots had been left empty), and the Best entry search.
 
 ### 9.2 Seventeen test shapes (seed 7, final version)
 
@@ -267,13 +282,14 @@ These changes came out of testing and are useful for the paper's discussion:
 ## 11. Limitations and future work
 
 - **Open safety case:** on very small areas where a narrow neck sits right at the entry (the dumbbell test), trucks entering and leaving can still meet at the gate mouth; mine-scale sites passed. Fix planned: lock the gate mouth together with the spine.
-- **Arrival model:** trucks arrive at a fixed average interval with a random mix; the haul cycle and the real number of trucks are not modelled yet.
+- **Some entry edges are unsafe:** from a few non-default entry edges (seen on the 80-acre crescent, an edge with a diagonal spine) the dispatcher let trucks touch (1–2 collisions per run). The default entry and the edges Best entry keeps are verified at 0 / 0; Best entry rejects any edge whose run has a collision. Root cause not yet found.
+- **Haul cycle:** one average cycle time with ±15 % random spread for every truck; loader queues and haul-road traffic are not modelled.
 - **2D only:** piles are circles; real piles spread unevenly and settle. Pile height and the dump crest are not modelled.
 - **Grid routing:** truck positions use a grid of about half a truck width; turning circles are not modelled exactly (the truck reverses to its pile from a free cell next to it).
 - **Lane mutex is conservative:** one moving truck in the lanes at a time is safe but limits throughput on very large areas; a convoy rule (same-direction following) would raise it.
 - **Text recognition:** works on clean drawings; unusual fonts may need values typed in.
 - **Baseline:** modelled as a fixed grid with 7.38 m gaps; real site layouts may differ.
-- **Next:** link to the rover prototype (the physical 2D test), add turning-circle-aware paths, haul-cycle arrivals, and pile settlement.
+- **Next:** link to the rover prototype (the physical 2D test), add turning-circle-aware paths, loader queues, and pile settlement.
 
 ---
 

@@ -211,7 +211,8 @@
       <section class="card">
         <h2>Entry, spine and branches</h2>
         <p class="hint">The <b>spine</b> is the main two-way road (IN + OUT) from the entry along the sweep direction to the back. Each bay half gets a temporary one-truck <b>branch</b> road off the spine. Branches and spine are filled last, deepest part first — like water rising.</p>
-        <div class="row"><button id="entryBtn3" style="flex:1">📍 Choose entry side</button></div>
+        <div class="row"><button id="entryBtn3" style="flex:1">📍 Choose entry side</button><button id="bestEntry" style="flex:1">✨ Best entry</button></div>
+        <p class="hint">Best entry runs the full dispatch from the current entry and the 4 longest edges and keeps the best run with no collision or deadlock (takes 1–5 min on big sites; in tests up to +7 points).</p>
         <div class="stats" id="stats4z"></div>
       </section>
       <section class="card">
@@ -251,6 +252,10 @@
         <table class="ztable" id="zoneTable"></table>
       </section>
       <section class="card">
+        <h2>Trucks</h2>
+        <table class="ztable" id="truckTable"></table>
+      </section>
+      <section class="card">
         <h2>Compare all three</h2>
         <div class="row"><button class="primary" id="cmpBtn" style="flex:1">Run all 3 on the same trucks</button></div>
         <div id="cmpBox"></div>
@@ -260,7 +265,9 @@
         <div class="row"><label>Speed in dump area</label><input type="number" id="c_kmh" value="20" step="1"><span class="u">km/h</span></div>
         <div class="row"><label>Manoeuvre / spot time</label><input type="number" id="c_tMan" value="60" step="5"><span class="u">s</span></div>
         <div class="row"><label>Dump time</label><input type="number" id="c_tDump" value="60" step="5"><span class="u">s</span></div>
-        <div class="row"><label>A truck arrives every</label><input type="number" id="c_every" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label>Haul cycle (load + travel)</label><input type="number" id="c_cycle" value="15" step="1"><span class="u">min</span></div>
+        <div class="row"><label>First trucks leave the pit every</label><input type="number" id="c_every" value="60" step="5"><span class="u">s</span></div>
+        <p class="hint">Only the trucks entered in Round 2 operate. Each one keeps looping: haul a load, dump, drive back to the loader, come back.</p>
         <div class="row"><label>Max trucks inside (Rule 3)</label><input type="number" id="c_maxIn" placeholder="= zones" step="1"><span class="u"></span></div>
         <div class="row"><label>Random seed (truck order)</label><input type="number" id="c_seed" value="7" step="1"><span class="u"></span></div>
         <div class="row"><button id="applyCfg" style="flex:1">Apply &amp; reset</button></div>
@@ -601,20 +608,23 @@ async function readDimensions() {
       progress(.25, "Loading the text reader (first time only)…");
       // text reader bundled in vendor/ (works offline); the online copy is only a fallback
       const base = new URL("vendor/tesseract/", location.href).href;
-      try { ocrWorker = await Tesseract.createWorker("eng", 1, { workerPath: base + "worker.min.js", corePath: base + "core", langPath: base + "lang", workerBlobURL: false }); }
-      catch (e) { ocrWorker = await Tesseract.createWorker("eng"); }
-      await ocrWorker.setParameters({ tessedit_char_whitelist: "0123456789.,minftcMN ", tessedit_pageseg_mode: "7" });
+      // a small pool of readers works on several labels at once
+      const mk = async () => { let w; try { w = await Tesseract.createWorker("eng", 1, { workerPath: base + "worker.min.js", corePath: base + "core", langPath: base + "lang", workerBlobURL: false }); }
+        catch (e) { w = await Tesseract.createWorker("eng"); }
+        await w.setParameters({ tessedit_char_whitelist: "0123456789.,minftcMN ", tessedit_pageseg_mode: "7" }); return w; };
+      const nW = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+      ocrWorker = await Promise.all(Array.from({ length: nW }, mk));
     }
     // find each text label, turn it level, and read it on its own
     // single characters right next to a corner are corner letters (A, B, …), not dimensions
     const pb = bounds(S.px), near = Math.max(pb[2] - pb[0], pb[3] - pb[1]) * 0.12;
     const labels = findTextLabels().filter(l => !(l.n === 1 && S.verts.some(([x, y]) => Math.hypot(x - l.cx, y - l.cy) < near)));
-    const found = [];
-    for (let k = 0; k < labels.length; k++) {
-      progress(.3 + .6 * k / labels.length, `Reading dimensions… (label ${k + 1} of ${labels.length})`);
-      const d = await readLabel(labels[k]); if (d) found.push(d);
-    }
-    S.dets = found;
+    const res = new Array(labels.length); let next = 0, doneN = 0;
+    progress(.3, `Reading dimensions… (0 of ${labels.length} labels)`);
+    await Promise.all(ocrWorker.map(async w => { while (next < labels.length) { const k = next++;
+      res[k] = await readLabel(labels[k], w); doneN++;
+      progress(.3 + .6 * doneN / labels.length, `Reading dimensions… (${doneN} of ${labels.length} labels)`); } }));
+    S.dets = res.filter(Boolean);
   } catch (err) {
     console.error(err);
     progress(1, location.protocol === "file:"
@@ -700,7 +710,7 @@ function findTextLabels() {
 }
 
 // crop a label, rotate it level (both ways up), OCR it as one line, keep the best numeric reading
-async function readLabel(lb) {
+async function readLabel(lb, worker) {
   const pad = lb.thickU * 0.6 + 4, Lw = lb.lenU + 2 * pad, Lh = lb.thickU + 2 * pad;
   const SC = Math.max(1, Math.min(8, 48 / Math.max(6, lb.thickU)));
   let best = null;
@@ -712,13 +722,14 @@ async function readLabel(lb) {
     const d = g.getImageData(0, 0, c.width, c.height), p = d.data;
     for (let i = 0; i < p.length; i += 4) { const v = Math.min(p[i], p[i + 1], p[i + 2]) < 170 ? 0 : 255; p[i] = p[i + 1] = p[i + 2] = v; }
     g.putImageData(d, 0, 0);
-    const { data } = await ocrWorker.recognize(c);
+    const { data } = await worker.recognize(c);
     const txt = (data.text || "").replace(/\s+/g, " ").trim().replace(",", ".");
     // a dimension label looks like "12", "12 in", "176.3607mm" — number first, optional unit after
     const m = txt.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z0-9]{0,3})$/);
     if (!m) continue;
     const score = data.confidence + m[1].length * 3 + (m[2] ? 10 : 0);
     if (!best || score > best.score) best = { score, text: m[1], value: parseFloat(m[1]), conf: data.confidence, raw: txt };
+    if (data.confidence > 85) break;                                   // clear reading the right way up: skip the upside-down try
   }
   if (!best || !(best.value > 0) || best.conf < 10) return null;
   const deg = ((lb.ang * 180 / Math.PI) % 180 + 180) % 180;
@@ -741,7 +752,7 @@ async function ocrAt(deg) {
   const c = document.createElement("canvas"); c.width = cw; c.height = ch;
   const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cw, ch);
   g.translate(cw / 2, ch / 2); g.rotate(a); g.drawImage(img, -W / 2, -H / 2, W, H);
-  const { data } = await ocrWorker.recognize(c);
+  const { data } = await ocrWorker[0].recognize(c);
   const words = data.words || [];
   const out = [];
   for (const wd of words) {
@@ -1455,6 +1466,29 @@ $("alignEntry").onclick = () => { S.sweep = sweepAlongEntry(); saveSession(); up
 $("rowsIn").onchange = () => { S.rows = Math.max(1, +$("rowsIn").value || 3); saveSession(); update3(); };
 $("showNums").onchange = draw;
 $("gap0").onclick = () => { S.fleet.forEach(t => S.gap[t.id] = 0); saveSession(); run4(); };
+// try the longest edges as the entry: run the real dispatcher (touching) from each, keep the best safe run.
+// The Round 4 plan alone does not predict the dispatch result well, so every candidate is simulated.
+async function bestEntry(onStep) {
+  const p = S.poly, keep = { entry: S.entry, sweep: S.sweep };
+  const edges = p.map((a, i) => { const b = p[(i + 1) % p.length]; return { i, L: Math.hypot(b[0] - a[0], b[1] - a[1]), pt: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; })
+    .sort((x, y) => y.L - x.L).slice(0, 4);
+  if (!edges.some(e => e.i === keep.entry.i)) edges.unshift({ i: keep.entry.i, pt: keep.entry.pt });
+  let best = null, k = 0;
+  for (const e of edges) {
+    k++; S.entry = { i: e.i, pt: e.pt }; S.sweep = sweepAlongEntry(); run4(); if (!S.r4) continue;
+    const L = S.r4.lane, deep = Math.max(...p.map(q => depthOf(q, L.F)));
+    if (L.depthMax < 0.75 * deep) continue;                            // spine stops short: zones behind it have no real access
+    if (onStep) onStep(k, edges.length);
+    const W = await runChunked(newSim("touch", Object.assign({}, S.simCfg))), s = simSummary(W);
+    if (s.collisions || s.deadlocks || !W.done) continue;              // only fully safe runs count
+    if (!best || s.cov > best.cov) best = { cov: s.cov, entry: S.entry, sweep: S.sweep };
+  }
+  if (best) { S.entry = best.entry; S.sweep = best.sweep; } else { S.entry = keep.entry; S.sweep = keep.sweep; }
+  run4(); saveSession(); return best;
+}
+$("bestEntry").onclick = async () => { const btn = $("bestEntry"); btn.disabled = true;
+  const b = await bestEntry((k, n) => banner(`Testing entry ${k} of ${n} (full dispatch run)…`));
+  btn.disabled = false; banner(b ? `Best entry chosen ✓ — ${f(b.cov, 1)} % in the test run (0 collisions, 0 deadlocks)` : "No safe alternative found — entry kept"); };
 $("gapHuman").onclick = () => { S.fleet.forEach(t => S.gap[t.id] = -2); saveSession(); run4(); };
 $("laneW").onchange = () => { const v = parseFloat($("laneW").value); S.laneW = v > 0 ? v : null; saveSession(); render2(); };
 $("toR4").onclick = () => setRound(4);
@@ -1463,7 +1497,7 @@ $("toR4").onclick = () => setRound(4);
 // ROUND 5 — Step 4 (dispatcher) + Step 5 (safety rules), live simulation
 // =====================================================================================
 const TYPE_COLORS = ["#c9a46b", "#6cb6ff", "#b083f0", "#3fb68b", "#e0823d", "#e06cb0"];
-const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, headway: 12, maxIn: null, seed: 7, method: "touch" };
+const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, cycle: 15, headway: 12, maxIn: null, seed: 7, method: "touch" };
 S.simCfg = Object.assign({}, SIM_DEFAULTS);
 
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -1499,6 +1533,11 @@ function newSim(method, cfg) {
     regionCache: new Map(), stuckFor: 0, fillTime: null, version: 0, failVer: null, minLaneDepth: Infinity, resv: new Map(), mutex: null,
   };
   W.maxIn = cfg.maxIn > 0 ? cfg.maxIn : Math.max(1, R.zones.length);
+  // the real fleet: every truck from Round 2, each looping pit -> dump -> pit
+  W.units = []; let u = 0;
+  S.fleet.forEach((t, k) => { for (let i = 0; i < Math.max(1, +t.count || 1); i++) W.units.push({ uid: ++u, name: "T" + u, ty: types[k], state: "away", back: 0, loads: 0 }); });
+  for (let i = W.units.length - 1; i > 0; i--) { const j = Math.floor(W.rand() * (i + 1)); [W.units[i], W.units[j]] = [W.units[j], W.units[i]]; }   // random departure order
+  W.units.forEach((un, i) => un.back = i * cfg.every);
   buildRouteGrid(W);
   if (method === "grid") W.baseSpots = R.grids[smallest.id].spots.map(s => ({ c: s.p, kind: s.kind || (s.lane ? "lane" : "zone"), order: s.order }));
   if (method === "base") W.baseSpots = fixedSpots(W);
@@ -1740,12 +1779,26 @@ function candidates(W, ty, opts) {
   if (opts.minDepth != null) list = list.filter(o => o.depth > opts.minDepth + 1e-6);
   return list;
 }
+// pockets first: a spot that the biggest pile would not fit (it would overlap a neighbour) can only ever be filled
+// by a smaller truck — give it to the smaller truck now, before the front closes it in
+function pocketsFirst(W, ty, list) {
+  if (W.method !== "touch" || ty.r >= W.rmax - 1e-6) return list;
+  const big = W.types.reduce((a, b) => a.r >= b.r ? a : b), pockets = []; let n = 0;
+  for (const o of list) {
+    if (o.dead || W.locked.has(o.z) || o.kind !== "zone") continue; if (++n > 250) break;
+    const fitsBig = !W.hash.near(o.c, big.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < big.r + q.r + gapOf(W, big, q.ty) - 1e-3);
+    if (!fitsBig) pockets.push(o);
+  }
+  if (!pockets.length) return list;
+  const set = new Set(pockets); return [...pockets, ...list.filter(o => !set.has(o))];
+}
 function findSpot(W, ty, opts = {}) {
   let busy = 0; const jammed = new Set();      // zones whose access route is taken right now: skip their other spots
 
-  for (const o of candidates(W, ty, opts)) {
+  for (const o of (opts.quick ? candidates(W, ty, opts) : pocketsFirst(W, ty, candidates(W, ty, opts)))) {
     if (o.dead) continue;                     // proved impossible earlier (piles only ever add, so it stays impossible)
     if (opts.quick) { // used by the lane rule: is there still any free, reachable zone spot deeper?
+      if (o.kind !== "lane" && W.minLaneDepth <= o.depth + ty.r) { o.dead = true; continue; }   // behind a spine pile: can never be reached again
       if (opts.zone != null && o.z !== opts.zone) continue;
       if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
       if (stopCell(W, o.c, ty.r, W.Wmax, true, true) < 0) continue;
@@ -1763,7 +1816,7 @@ function findSpot(W, ty, opts = {}) {
       { const lp = laneAt(W, -1, depthOf(cellXY(W.G, res.stop), W.F)), sp = cellXY(W.G, res.stop); let hit = false;
         for (let t = 0.15; t <= 1 && !hit; t += 0.1) { const k = cellAt(W.G, [lp[0] + (sp[0] - lp[0]) * t, lp[1] + (sp[1] - lp[1]) * t]); if (k >= 0 && W.resv.has(k)) hit = true; }
         if (hit) { jammed.add(o.z); continue; } }
-      if (++busy > 12) { W.capped = true; return null; }                              // limit the expensive route searches (retry soon)
+      if (++busy > 12 && W.trucks.length) { W.capped = true; return null; }          // limit route searches while trucks are inside (retry soon); exhaustive when the area is empty
       const pin0 = routeIn(W, res.stop); if (!pin0) { W.stats.skipped++; o.dead = true; continue; }
       const pin = densify(pin0, W.G.cs);
       const saved = foot.map(k => W.G.free[k]); foot.forEach(k => W.G.free[k] = 0);
@@ -1907,22 +1960,23 @@ function routeOut(W, from) {
 }
 function stepSim(W, dt) {
   const cfg = W.cfg, v = cfg.kmh / 3.6;
-  // arrivals (random mix by share)
-  while (W.t >= W.nextArrival && !W.allFull) {
-    const live = W.types.filter(t => !W.full.has(t.id));
-    let x = W.rand() * live.reduce((s, t) => s + t.share, 0), ty = live[0];
-    for (const t of live) { x -= t.share; if (x <= 0) { ty = t; break; } }
-    W.queue.push({ ty, at: W.nextArrival });
-    W.nextArrival += cfg.every * (0.7 + 0.6 * W.rand());
+  // arrivals: a fleet truck back from the pit joins the gate queue
+  for (const un of W.units) if (un.state === "away" && W.t >= un.back) {
+    if (W.full.has(un.ty.id)) { un.state = "parked"; continue; }
+    un.state = "queue"; W.queue.push({ ty: un.ty, at: W.t, unit: un });
   }
   // gate (Rule 3): enter only if fewer than maxIn inside, with a headway
   if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway && W.failVer !== W.version + ":" + W.queue[0].ty.id && W.failVer !== "retry@" + Math.floor(W.t / 30)) {
     W.capped = false;
     const q = W.queue[0], tr = release(W, q.ty);
     if (!tr) W.failVer = W.capped ? "retry@" + Math.floor(W.t / 30) : W.version + ":" + q.ty.id;   // a capped search is retried every 30 s
-    if (tr) { W.queue.shift(); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); }
+    if (tr) { tr.unit = q.unit; if (q.unit) q.unit.state = "inside"; W.queue.shift(); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); }
     else if (!W.trucks.length) {                                   // nothing inside and still no spot: this truck size cannot fit any more
-      W.full.add(q.ty.id); W.queue = W.queue.filter(z => { if (z.ty.id === q.ty.id) { W.stats.turnedAway++; return false; } return true; });
+      W.full.add(q.ty.id); W.queue = W.queue.filter(z => { if (z.ty.id === q.ty.id) { W.stats.turnedAway++; if (z.unit) z.unit.state = "parked"; return false; } return true; });
+      if (W.full.size === W.types.length && W.recheckVer !== W.version) {   // before ending: a type marked full earlier may fit again now
+        W.recheckVer = W.version;
+        for (const t of W.types) if (findSpot(W, t)) { W.full.delete(t.id); for (const un of W.units) if (un.ty === t && un.state === "parked") { un.state = "away"; un.back = W.t; } }
+      }
       if (W.full.size === W.types.length) { W.allFull = true; W.queue = []; }
     }
   }
@@ -1962,7 +2016,8 @@ function stepSim(W, dt) {
     if (tr.phase === "out" && tr.zoneOpen !== true && tr.wp > tr.unlockAt) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); tr.zoneOpen = true; W.version++; }   // back in the lane: zone + route free
     moved = true;
   }
-  W.trucks = W.trucks.filter(tr => { if (tr.phase === "gone") { if (!tr.zoneOpen) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); } if (W.mutex === tr) W.mutex = null; W.version++; return false; } return true; });
+  W.trucks = W.trucks.filter(tr => { if (tr.phase === "gone" && tr.unit) { const un = tr.unit; un.loads++; un.state = "away"; un.back = W.t + cfg.cycle * 60 * (0.85 + 0.3 * W.rand()); }
+    if (tr.phase === "gone") { if (!tr.zoneOpen) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); } if (W.mutex === tr) W.mutex = null; W.version++; return false; } return true; });
   // safety measurement: two trucks overlapping = collision (counted once per pair)
   for (let i = 0; i < W.trucks.length; i++) for (let j = i + 1; j < W.trucks.length; j++) {
     const a = W.trucks[i], b = W.trucks[j], key = a.id + "-" + b.id;
@@ -2040,7 +2095,7 @@ function simSummary(W) {
 // ---------------------------------------------------------------- Round 5 UI
 let SIM = null, simTimer = null, simSpeed = 1;
 const METHOD_NAMES = { base: "Baseline (fixed spots, 7.38 m gap)", grid: "Grid + remove", touch: "Touching placement" };
-function readCfg() { ["kmh", "tMan", "tDump", "every", "maxIn", "seed"].forEach(k => { const v = parseFloat($("c_" + k).value); S.simCfg[k] = k === "maxIn" ? (v > 0 ? v : null) : (v > 0 ? v : SIM_DEFAULTS[k]); }); }
+function readCfg() { ["kmh", "tMan", "tDump", "every", "cycle", "maxIn", "seed"].forEach(k => { const v = parseFloat($("c_" + k).value); S.simCfg[k] = k === "maxIn" ? (v > 0 ? v : null) : (v > 0 ? v : SIM_DEFAULTS[k]); }); }
 function resetSim() { stopSim(); readCfg(); SIM = newSim(S.simCfg.method, Object.assign({}, S.simCfg)); render5(); draw(); }
 function stopSim() { if (simTimer) cancelAnimationFrame(simTimer); simTimer = null; $("playBtn").textContent = "▶ Play"; }
 function playSim() {
@@ -2078,7 +2133,7 @@ function render5() {
     ["Status", W.done ? `<span class="ok">Area full after ${f(W.fillTime / 3600, 1)} h</span>` : "running"],
   ].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
   banner(`${METHOD_NAMES[W.method]} · ${placed.length} piles · ${f(cov5.v, 1)} % covered`);
-  renderZones(W);
+  renderZones(W); renderTrucks(W);
 }
 function compareAll() {
   stopSim(); readCfg(); $("cmpBox").innerHTML = '<p class="hint">Running all three methods…</p>';
@@ -2130,12 +2185,23 @@ function zoneDone(W, z) {   // no free spot left for the smallest truck in the z
   return W._zd.m.get(z.n);
 }
 const PHASE_NAME = { in: "driving in", man: "reversing", dump: "dumping", out: "leaving" };
+const UNIT_STATE = { away: ["#8b9bab", "at the pit / hauling"], queue: ["#e5534b", "waiting at gate"], parked: ["#5c6b7a", "parked (its pile size no longer fits)"] };
+function renderTrucks(W) {
+  if (!W.units) return;
+  const inside = new Map(W.trucks.filter(t => t.unit).map(t => [t.unit.uid, t]));
+  $("truckTable").innerHTML = `<tr><th>Truck</th><th>Type</th><th>Status</th><th>Loads</th></tr>` + W.units.slice().sort((a, b) => a.uid - b.uid).map(un => {
+    const tr = inside.get(un.uid);
+    const st = tr ? [ { in: "#f5a623", man: "#3fb68b", dump: "#3fb68b", out: "#6cb6ff" }[tr.phase] || "#f5a623", `${PHASE_NAME[tr.phase] || ""} · Z${tr.spot.zone === "L" ? "spine" : tr.spot.zone}`]
+      : W.done ? ["#d6c14a", "finished — area full"]
+      : un.state === "away" ? [UNIT_STATE.away[0], `hauling · back in ${Math.max(0, Math.round((un.back - W.t) / 60))} min`] : UNIT_STATE[un.state] || ["#8b9bab", un.state];
+    return `<tr><td><b>${un.name}</b></td><td><span style="color:${un.ty.color}">●</span> ${un.ty.name}</td><td><span class="zdot" style="background:${st[0]}"></span>${st[1]}</td><td>${un.loads}</td></tr>`; }).join("");
+}
 function renderZones(W) {
   const zs = zoneStatus(W); W._zs = zs;
   $("zoneTable").innerHTML = `<tr><th>Zone</th><th>Status</th><th>Truck</th><th>Piles</th><th>Fill</th></tr>` +
     [...zs.values()].map(o => { const [col, name] = ZSTAT[o.st];
       return `<tr><td><b>Z${o.z.n}</b></td><td><span class="zdot" style="background:${col}"></span>${name}</td>
-        <td>${o.tr ? `T${o.tr.id} <span style="color:${o.tr.ty.color}">●</span> ${PHASE_NAME[o.tr.phase] || ""}` : "–"}</td><td>${o.piles}</td>
+        <td>${o.tr ? `${o.tr.unit ? o.tr.unit.name : "T" + o.tr.id} <span style="color:${o.tr.ty.color}">●</span> ${PHASE_NAME[o.tr.phase] || ""}` : "–"}</td><td>${o.piles}</td>
         <td><span class="bar"><i style="width:${o.fill.toFixed(0)}%;background:${col}"></i></span> ${o.fill.toFixed(0)}%</td></tr>`; }).join("");
 }
 function draw5() {
@@ -2161,7 +2227,7 @@ function draw5() {
   W.R.zones.forEach(z => { const o = zs.get(z.n), col = ZSTAT[o ? o.st : "idle"][0], [X, Y] = W2S(centroidOf(z.poly));
     label(`Z${z.n} ${o ? o.fill.toFixed(0) : 0}%`, X, Y, col, "#0f1419"); });
   // truck numbers
-  for (const tr of W.trucks) { const [X, Y] = W2S(tr.pos); label(`T${tr.id}`, X, Y - tr.ty.W * view.s - 6, "#e6edf3", "#0f1419"); }
+  for (const tr of W.trucks) { const [X, Y] = W2S(tr.pos); label(tr.unit ? tr.unit.name : `T${tr.id}`, X, Y - tr.ty.W * view.s - 6, "#e6edf3", "#0f1419"); }
   if (W.queue.length) { const g = W.R.lane.inLine[0], [X, Y] = W2S([g[0] - W.F.n[0] * 18, g[1] - W.F.n[1] * 18]); label(`${W.queue.length} waiting`, X, Y, "#e5534b", "#fff"); }
 }
 document.querySelectorAll("#methodTabs button").forEach(b => b.onclick = () => { S.simCfg.method = b.dataset.m; resetSim(); });
