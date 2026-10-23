@@ -187,6 +187,8 @@ Both are also **measured**, not assumed: a collision is two truck bodies overlap
 ### 8.5 Settings and output
 Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), a truck every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all three" runs every method on the same truck sequence.
 
+**Zone panel:** each zone shows its status (not started · in progress · truck assigned · dumping · finished), its truck and what that truck is doing, its pile count and fill %. Zones are coloured the same way on the map, every truck is labelled T#, and the panel shows the coverage next to the theoretical maximum.
+
 ---
 
 ## 9. Verification
@@ -265,7 +267,6 @@ These changes came out of testing and are useful for the paper's discussion:
 ## 11. Limitations and future work
 
 - **Open safety case:** on very small areas where a narrow neck sits right at the entry (the dumbbell test), trucks entering and leaving can still meet at the gate mouth; mine-scale sites passed. Fix planned: lock the gate mouth together with the spine.
-- **Round 5 zone panel:** each zone shows its status (not started / in progress / truck assigned / dumping / finished), its truck and what that truck is doing, its pile count and fill %; zones are coloured the same on the map and every truck is labelled T#.
 - **Arrival model:** trucks arrive at a fixed average interval with a random mix; the haul cycle and the real number of trucks are not modelled yet.
 - **2D only:** piles are circles; real piles spread unevenly and settle. Pile height and the dump crest are not modelled.
 - **Grid routing:** truck positions use a grid of about half a truck width; turning circles are not modelled exactly (the truck reverses to its pile from a free cell next to it).
