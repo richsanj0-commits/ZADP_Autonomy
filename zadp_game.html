@@ -376,10 +376,10 @@ drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
 drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const file = e.dataTransfer.files[0]; if (file) openFile(file); };
 const SAMPLES = [
-  { file: "site_valley_fill_50ac", name: "Valley fill 50 ac", W: 715.7, H: 336.3 },
-  { file: "site_pit_crescent_80ac", name: "Pit crescent 80 ac", W: 1019.1, H: 574.6 },
-  { file: "site_two_lobes_120ac", name: "Two lobes 120 ac", W: 1177.9, H: 569.2 },
-  { file: "site_waste_dump_150ac", name: "Waste dump 150 ac", W: 907.6, H: 705.9 },
+  { file: "site_valley_fill_50ac", name: "Valley fill 50 ac", W: 715.7, H: 336.3, bestEdge: 12 },
+  { file: "site_pit_crescent_80ac", name: "Pit crescent 80 ac", W: 1019.1, H: 574.6, bestEdge: 40 },
+  { file: "site_two_lobes_120ac", name: "Two lobes 120 ac", W: 1177.9, H: 569.2, bestEdge: 31 },
+  { file: "site_waste_dump_150ac", name: "Waste dump 150 ac", W: 907.6, H: 705.9, bestEdge: 9 },
   { file: "site_L_paddock_200ac", name: "L paddock 200 ac", W: 1157.3, H: 1052.1 },
 ];
 SAMPLES.forEach(sm => {
@@ -2261,9 +2261,9 @@ async function runDemo() {
     const img = new Image(); await new Promise(r => { img.onload = r; img.src = "test_sketches/" + sm.file + ".png"; });
     S.sample = sm; analyseImage(img, sm.file + ".png");
     await sleep(300); if (S.mode === "pick") useSelection();
-    for (let k = 0; k < 200 && /…/.test($("progMsg").textContent); k++) await sleep(250);
+    for (let k = 0; k < 240 && !/^(Read \d|No numbers|Could not|The text reader)/.test($("progMsg").textContent); k++) await sleep(250);
     S.view1 = "sketch"; setViewTab(); fitView(); draw(); await sleep(3500);
-    $("buildBtn").click(); $("areaName").value = sm.name;
+    S.entry = null; $("buildBtn").click(); if (!S.entry) autoEntry(); $("areaName").value = sm.name;
     caption("Round 1 · Real shape", `The shape is rebuilt <b>to real size in metres</b> from the dimensions: ${f(Math.abs(area(S.poly)) / 4046.86, 0)} acres.`);
     await sleep(3000); $("saveArea").click();
     caption("Round 2 · Fleet", `Two truck types by <b>payload</b>. Each pile is a 2D circle: radius from the load volume (payload ÷ loose density) as a cone at the angle of repose. ${S.fleet.map(t => `${t.name}: r = ${f(calc(t).r, 2)} m`).join(" · ")}`);
@@ -2272,6 +2272,9 @@ async function runDemo() {
     caption("Round 3 · Step 1 + Step 2", `<b>Minkowski erosion</b> shrinks the area by the largest truck margins: the green safe zone is where a truck's centre may go. Then the <b>Boustrophedon sweep</b> cuts it into cells at every critical point, and big cells into <b>bays</b> sized from the trucks (${f(S.part ? S.part.B : 0, 0)} m): ${S.part ? S.part.cells.length : 0} cells, ${S.part ? S.part.bays.length : 0} bays.`);
     await sleep(6000);
     setRound(4);
+    // entry found earlier by the Best entry search (full dispatch runs) for this sample site
+    const be = sm.bestEdge, p = S.poly;
+    if (be != null && p && p[be]) { const a = p[be], b = p[(be + 1) % p.length]; S.entry = { i: be, pt: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; S.sweep = sweepAlongEntry(); run4(); }
     const G = S.r4 && S.r4.grids[S.view4];
     caption("Round 4 · Step 3", `From the entry, a two-way <b>spine</b> runs to the back. Each bay half is a work zone with a temporary <b>branch</b> road. Piles are packed in a <b>hexagonal grid</b> (densest circle packing): ${G ? G.spots.length : 0} spots for the ${S.fleet.find(t => t.id === S.view4).name}. Branches and spine fill last, like water rising.`);
     await sleep(6500);
