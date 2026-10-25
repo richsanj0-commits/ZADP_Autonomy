@@ -325,43 +325,6 @@ const letter = i => i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1);
 const f = (v, d = 2) => (v == null || !isFinite(v)) ? "–" : (+v).toFixed(d);
 function pointInPoly([x, y], p) { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) { const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; }
 
-// Douglas–Peucker simplification: keeps only the real corners of a traced outline
-function dp(pts, tol) {
-  if (pts.length < 3) return pts;
-  const keep = new Uint8Array(pts.length); keep[0] = keep[pts.length - 1] = 1;
-  const st = [[0, pts.length - 1]];
-  while (st.length) {
-    const [a, b] = st.pop(); let md = 0, mi = -1;
-    const [ax, ay] = pts[a], [bx, by] = pts[b], dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1e-9;
-    for (let i = a + 1; i < b; i++) { const d = Math.abs(dy * (pts[i][0] - ax) - dx * (pts[i][1] - ay)) / L; if (d > md) { md = d; mi = i; } }
-    if (md > tol) { keep[mi] = 1; st.push([a, mi], [mi, b]); }
-  }
-  return pts.filter((_, i) => keep[i]);
-}
-function dpClosed(pts, tol) {
-  if (pts.length < 4) return pts.slice();
-  let far = 0, fd = 0;
-  for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
-  return dp(pts.slice(0, far + 1), tol).slice(0, -1).concat(dp(pts.slice(far).concat([pts[0]]), tol).slice(0, -1));
-}
-// merge corners closer than minLen and drop corners that turn by less than 8°
-function mergeCorners(p, minLen) {
-  let q = p.slice(), changed = true;
-  while (changed && q.length > 3) {
-    changed = false;
-    for (let i = 0; i < q.length && q.length > 3; i++) {
-      const a = q[i], b = q[(i + 1) % q.length];
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) < minLen) { q[i] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; q.splice((i + 1) % q.length, 1); changed = true; break; }
-    }
-    for (let i = 0; i < q.length && q.length > 3 && !changed; i++) {
-      const a = q[(i - 1 + q.length) % q.length], b = q[i], c = q[(i + 1) % q.length];
-      const t = Math.abs(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]));
-      if (Math.min(t, 2 * Math.PI - t) < 8 * Math.PI / 180) { q.splice(i, 1); changed = true; }
-    }
-  }
-  return q;
-}
-
 // Clipper (integer, mm) helpers
 const K = 1000;
 const toC = p => p.map(([x, y]) => ({ X: Math.round(x * K), Y: Math.round(y * K) }));
@@ -370,7 +333,7 @@ const fromC = p => p.map(q => [q.X / K, q.Y / K]);
 // =====================================================================================
 // ROUND 1 · step A — find the shape in the image
 // =====================================================================================
-$("fileIn").onchange = e => { const file = e.target.files[0]; if (file) openFile(file); };
+$("fileIn").onchange = e => { const file = e.target.files[0]; e.target.value = ""; if (file) openFile(file); };   // cleared: choosing the same file again re-reads it
 const drop = $("drop");
 drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
 drop.ondragleave = () => drop.classList.remove("over");
@@ -388,10 +351,16 @@ SAMPLES.forEach(sm => {
   b.onclick = () => { const img = new Image(); img.onload = () => { S.sample = sm; analyseImage(img, sm.file + ".png"); }; img.src = "test_sketches/" + sm.file + ".png"; };
   $("samples").append(b);
 });
-function openFile(file) { S.sample = null; const img = new Image(); img.onload = () => analyseImage(img, file.name); img.src = URL.createObjectURL(file); }
+function openFile(file) {
+  S.sample = null; const img = new Image(), url = URL.createObjectURL(file);
+  img.onload = () => { URL.revokeObjectURL(url); analyseImage(img, file.name); };
+  img.onerror = () => { URL.revokeObjectURL(url); progress(0, "This file could not be opened as an image. Use PNG or JPG (export a PDF page as an image first)."); banner("Could not open the file"); };
+  img.src = url;
+}
 function progress(p, msg) { $("prog").style.width = (p * 100) + "%"; $("progMsg").textContent = msg || ""; }
 
 function analyseImage(img, name) {
+  if (location.protocol !== "file:") getOcrPool().catch(() => {});   // start loading the text reader while the outline is traced
   resetRound1();
   const MAX = 900, sc = Math.min(1, MAX / Math.max(img.width, img.height));
   const w = Math.round(img.width * sc), h = Math.round(img.height * sc), N = w * h;
@@ -510,6 +479,7 @@ function segmentOutline(raw, tol, big) {
     if (isMax && (!corners.length || i - corners[corners.length - 1] > k)) corners.push(i);
   }
   if (corners.length > 1 && corners[0] + n - corners[corners.length - 1] <= k) corners.pop();
+  if (corners.length === 1) corners.push((corners[0] + (n >> 1)) % n), corners.sort((a, b) => a - b);   // one corner (teardrop): split opposite it
   if (!corners.length) corners = [0, n >> 1];                                   // smooth closed curve: split in two
   // pieces between corners
   let segs = [];
@@ -529,8 +499,9 @@ function segmentOutline(raw, tol, big) {
 }
 
 function lineDev(pts) {
-  const a = pts[0], b = pts[pts.length - 1], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1e-9;
-  let md = 0, mi = 0; pts.forEach((p, i) => { const d = Math.abs(dy * (p[0] - a[0]) - dx * (p[1] - a[1])) / L; if (d > md) { md = d; mi = i; } });
+  const a = pts[0], b = pts[pts.length - 1], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+  // closed piece (a = b): distance from a, so a loop is never taken for a zero-length line
+  let md = 0, mi = 0; pts.forEach((p, i) => { const d = L > 1e-6 ? Math.abs(dy * (p[0] - a[0]) - dx * (p[1] - a[1])) / L : Math.hypot(p[0] - a[0], p[1] - a[1]); if (d > md) { md = d; mi = i; } });
   return { md, mi };
 }
 // algebraic (Kåsa) least-squares circle:  x² + y² + Dx + Ey + F = 0
@@ -599,44 +570,61 @@ const segMid = s => s.t === "line" ? [(s.a[0] + s.b[0]) / 2, (s.a[1] + s.b[1]) /
 // =====================================================================================
 // ROUND 1 · step B — read the numbers written on the sketch (OCR)
 // =====================================================================================
-let ocrWorker = null;
+// ocrWorker: the pool of readers (array, shared by all images) once loaded; ocrPool: the promise that makes it (once)
+// ocrGen: id of the current analysis; a run superseded by a newer image / selection / reset never writes S
+let ocrWorker = null, ocrPool = null, ocrGen = 0;
+function getOcrPool() {
+  return ocrPool ??= (async () => {
+    // text reader bundled in vendor/ (works offline); the online copy is only a fallback
+    const base = new URL("vendor/tesseract/", location.href).href;
+    // a small pool of readers works on several labels at once
+    const mk = async () => { let w; try { w = await Tesseract.createWorker("eng", 1, { workerPath: base + "worker.min.js", corePath: base + "core", langPath: base + "lang", workerBlobURL: false }); }
+      catch (e) { w = await Tesseract.createWorker("eng"); }
+      try { await w.setParameters({ tessedit_char_whitelist: "0123456789.,minftcMN ", tessedit_pageseg_mode: "7" }); }
+      catch (e) { w.terminate().catch(() => {}); throw e; }
+      return w; };
+    const nW = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+    const rs = await Promise.allSettled(Array.from({ length: nW }, mk)), ok = rs.filter(r => r.status === "fulfilled").map(r => r.value);
+    if (!ok.length) throw rs[0].reason;
+    return (ocrWorker = ok);                                       // fewer readers than asked for is fine
+  })().catch(e => { ocrPool = null; throw e; });                  // failed: the next image tries again
+}
 async function readDimensions() {
+  const gen = ++ocrGen, stale = () => gen !== ocrGen;
   S.dets = []; S.poly = null; S.fit = null;
   initDims(); fitView(); draw();
+  let dets = [], errMsg = null;
   try {
-    if (!ocrWorker) {
-      progress(.25, "Loading the text reader (first time only)…");
-      // text reader bundled in vendor/ (works offline); the online copy is only a fallback
-      const base = new URL("vendor/tesseract/", location.href).href;
-      // a small pool of readers works on several labels at once
-      const mk = async () => { let w; try { w = await Tesseract.createWorker("eng", 1, { workerPath: base + "worker.min.js", corePath: base + "core", langPath: base + "lang", workerBlobURL: false }); }
-        catch (e) { w = await Tesseract.createWorker("eng"); }
-        await w.setParameters({ tessedit_char_whitelist: "0123456789.,minftcMN ", tessedit_pageseg_mode: "7" }); return w; };
-      const nW = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
-      ocrWorker = await Promise.all(Array.from({ length: nW }, mk));
-    }
-    // find each text label, turn it level, and read it on its own
+    // find each text label, turn it level, and read it on its own (labels + dimension lines of THIS image, before any await)
     // single characters right next to a corner are corner letters (A, B, …), not dimensions
     const pb = bounds(S.px), near = Math.max(pb[2] - pb[0], pb[3] - pb[1]) * 0.12;
-    const labels = findTextLabels().filter(l => !(l.n === 1 && S.verts.some(([x, y]) => Math.hypot(x - l.cx, y - l.cy) < near)));
-    const res = new Array(labels.length); let next = 0, doneN = 0;
+    const labels = findTextLabels().filter(l => !(l.n === 1 && S.verts.some(([x, y]) => Math.hypot(x - l.cx, y - l.cy) < near))), dimLines = S.dimLines;
+    if (!ocrWorker) progress(.25, "Loading the text reader (first time only)…");
+    const pool = await getOcrPool();
+    if (stale()) return;
+    const res = new Array(labels.length), fails = new Map(); let next = 0, doneN = 0;
     progress(.3, `Reading dimensions… (0 of ${labels.length} labels)`);
-    await Promise.all(ocrWorker.map(async w => { while (next < labels.length) { const k = next++;
-      res[k] = await readLabel(labels[k], w); doneN++;
-      progress(.3 + .6 * doneN / labels.length, `Reading dimensions… (${doneN} of ${labels.length} labels)`); } }));
-    S.dets = res.filter(Boolean);
+    await Promise.all(pool.slice().map(async w => { while (next < labels.length && !stale()) { const k = next++;
+      try { res[k] = await readLabel(labels[k], w, dimLines); }
+      catch (e) { console.warn("OCR failed on label", k, e); fails.set(w, (fails.get(w) || 0) + 1);
+        if (fails.get(w) >= 2 && (pool.length > 1 || !pool.includes(w))) {   // broken reader: drop it from the pool (another run may have already)
+          const ix = pool.indexOf(w); if (ix >= 0) { pool.splice(ix, 1); w.terminate().catch(() => {}); } doneN++; return; } }
+      doneN++; if (!stale()) progress(.3 + .6 * doneN / labels.length, `Reading dimensions… (${doneN} of ${labels.length} labels)`); } }));
+    dets = res.filter(Boolean);
   } catch (err) {
     console.error(err);
-    progress(1, location.protocol === "file:"
+    errMsg = location.protocol === "file:"
       ? "The text reader cannot start when the page is opened as a file. Close it and double-click start.bat. (You can still type the dimensions below.)"
-      : "Could not start the text reader. Type the dimensions below, or pick a sample sketch.");
+      : "Could not start the text reader. Type the dimensions below, or pick a sample sketch.";
   }
+  if (stale()) return;                                             // a newer image / selection / reset took over
+  S.dets = dets;
   assignDims();
   if (S.sample) for (const d of S.dims) {                       // sample sketch: overall size is known even if the reader misses it
     if (d.kind === "width" && d.value == null) { d.value = S.sample.W; d.src = "user"; }
     if (d.kind === "height" && d.value == null) { d.value = S.sample.H; d.src = "user"; }
   }
-  progress(1, S.dets.length ? `Read ${S.dets.length} number(s) from the sketch` : "No numbers found on the sketch — please enter the dimensions");
+  progress(1, errMsg || (S.dets.length ? `Read ${S.dets.length} number(s) from the sketch` : "No numbers found on the sketch — please enter the dimensions"));
   renderDims(); draw();
 }
 
@@ -670,9 +658,22 @@ function findTextLabels() {
   for (let i = 0; i < chars.length; i++) for (let j = i + 1; j < chars.length; j++) {
     const a = chars[i], b = chars[j], gx = Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1)), gy = Math.max(0, Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
     if (Math.hypot(gx, gy) < ch * 0.9) parent[find(i)] = find(j); }
-  const groups = {}; chars.forEach((b, i) => (groups[find(i)] ??= []).push(b));
+  // decimal points / commas are below the character size limit above: keep each one that sits right beside a character,
+  // let it join the digits on both sides, and draw it into the label bitmap ("1019.1" must not reach the reader as "1019 1")
+  const isChar = new Set(chars), dotAt = [];
+  for (const d of blobs) {
+    const bw = d.x1 - d.x0 + 1, bh = d.y1 - d.y0 + 1, m = Math.max(bw, bh);
+    if (isChar.has(d) || m < Math.max(3, ch * 0.15) || m > ch * 0.45 || Math.min(bw, bh) < m * 0.4 || d.n < 6 || d.n / (bw * bh) < 0.35) continue;
+    const near = [];
+    chars.forEach((b, j) => { const gx = Math.max(0, Math.max(d.x0, b.x0) - Math.min(d.x1, b.x1)), gy = Math.max(0, Math.max(d.y0, b.y0) - Math.min(d.y1, b.y1)); if (Math.hypot(gx, gy) < ch * 0.6) near.push(j); });
+    if (!near.length) continue;
+    for (const j of near) parent[find(j)] = find(near[0]);
+    dotAt.push([d, near[0]]);
+  }
+  const groups = {}, dotsOf = {}; chars.forEach((b, i) => (groups[find(i)] ??= []).push(b));
+  for (const [d, j] of dotAt) (dotsOf[find(j)] ??= []).push(d);
   const labels = [];
-  for (const grp of Object.values(groups)) {
+  for (const [root, grp] of Object.entries(groups)) {
     let n = 0, mx = 0, my = 0;
     for (const b of grp) for (const i of b.pix) { mx += i % w; my += (i / w) | 0; n++; }
     mx /= n; my /= n;
@@ -684,16 +685,46 @@ function findTextLabels() {
       if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; }
     const L = u1 - u0, T = v1 - v0;
     if (grp.length < 1 || L < ch * 0.5) continue;
-    // a single-character blob reads as horizontal; long labels use their axis
-    const axis = grp.length === 1 ? 0 : (L > T * 1.3 ? ang : ang + Math.PI / 2);
+    // text direction: the PCA axis or its perpendicular, whichever the line through the character centres follows
+    // (right even for "11", whose pixels can make PCA pick the wrong one); else the longer extent; one character reads horizontal
+    const thin = (b, k) => Math.min(b.x1 - b.x0 + 1, b.y1 - b.y0 + 1) < k * Math.max(b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
+    let axis = grp.length === 1 ? 0 : (L >= T ? ang : ang + Math.PI / 2);
+    if (grp.length >= 2) {   // centres of the glyphs, not of a stroke (arrow line) that joined the group
+      const gl = grp.filter(b => !thin(b, 0.3)), cs = (gl.length >= 2 ? gl : grp).map(b => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]);
+      const gx = cs.reduce((s, c) => s + c[0], 0) / cs.length, gy = cs.reduce((s, c) => s + c[1], 0) / cs.length;
+      let cxx = 0, cyy = 0, cxy = 0; for (const [x, y] of cs) { cxx += (x - gx) ** 2; cyy += (y - gy) ** 2; cxy += (x - gx) * (y - gy); }
+      if (Math.sqrt(cxx + cyy) / cs.length > ch * 0.15) axis = Math.abs(Math.sin(0.5 * Math.atan2(2 * cxy, cxx - cyy) - ang)) > Math.SQRT1_2 ? ang + Math.PI / 2 : ang;
+      // short label (about as long as tall, e.g. "11"): the pixel axis follows the glyph shapes and is tilted (~10°, the reader
+      // then sees "1"), so take the line through the middles of its full-height glyphs (digits, not "in" / "mm")
+      if (Math.max(L, T) < 1.6 * Math.min(L, T)) {
+        const ca1 = Math.cos(axis), sa1 = Math.sin(axis), gm = (gl.length >= 2 ? gl : grp).map(b => { let s = 0, v0 = 1e9, v1 = -1e9;
+          for (const i of b.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my, v = -dx * sa1 + dy * ca1; s += dx * ca1 + dy * sa1; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+          return [s / b.pix.length, (v0 + v1) / 2, v1 - v0]; });
+        const hm = Math.max(...gm.map(e => e[2])), tl = gm.filter(e => e[2] >= hm * 0.85);
+        if (tl.length >= 2) { const um = tl.reduce((s, e) => s + e[0], 0) / tl.length, vm = tl.reduce((s, e) => s + e[1], 0) / tl.length; let suu = 0, suv = 0;
+          for (const [u, v] of tl) { suu += (u - um) ** 2; suv += (u - um) * (v - vm); }
+          const tilt = Math.atan2(suv, suu); if (suu > (ch * 0.3) ** 2 && Math.abs(tilt) < 0.35) axis += tilt; }
+      }
+    }
+    const cb = Math.cos(axis), sb = Math.sin(axis);
+    // dashed / dash-dot lines: every blob is a thin stroke lying along the group's axis (digits stand across it); a lone thin stroke too
+    if (grp.length === 1 ? thin(grp[0], 0.2) : grp.every(b => thin(b, 0.3) && (b.x1 - b.x0 > b.y1 - b.y0) === (Math.abs(cb) > 0.7))) continue;
+    // extent along / across the text direction
+    let p0 = 1e9, p1 = -1e9, q0 = 1e9, q1 = -1e9;
+    for (const b of grp) for (const i of b.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my, u = dx * cb + dy * sb, v = -dx * sb + dy * cb;
+      if (u < p0) p0 = u; if (u > p1) p1 = u; if (v < q0) q0 = v; if (v > q1) q1 = v; }
+    const lenA = p1 - p0, thkA = q1 - q0;
+    // points of this label: low on the line (high when upside down), not a speck at mid-height
+    const dots = (dotsOf[root] || []).filter(d => { const dx = (d.x0 + d.x1) / 2 - mx, dy = (d.y0 + d.y1) / 2 - my; return Math.abs(-dx * sb + dy * cb - (q0 + q1) / 2) >= thkA * 0.2; });
+    const inkB = grp.concat(dots);
     // clean bitmap of just this label's pixels (no nearby lines)
-    let bx0 = w, by0 = h, bx1 = 0, by1 = 0; for (const b of grp) { bx0 = Math.min(bx0, b.x0); by0 = Math.min(by0, b.y0); bx1 = Math.max(bx1, b.x1); by1 = Math.max(by1, b.y1); }
+    let bx0 = w, by0 = h, bx1 = 0, by1 = 0; for (const b of inkB) { bx0 = Math.min(bx0, b.x0); by0 = Math.min(by0, b.y0); bx1 = Math.max(bx1, b.x1); by1 = Math.max(by1, b.y1); }
     const bm = document.createElement("canvas"); bm.width = bx1 - bx0 + 1; bm.height = by1 - by0 + 1;
     const bg = bm.getContext("2d"), id = bg.createImageData(bm.width, bm.height);
-    id.data.fill(255); for (const b of grp) for (const i of b.pix) { const o = (((i / w) | 0) - by0) * bm.width + (i % w - bx0); id.data[o * 4] = id.data[o * 4 + 1] = id.data[o * 4 + 2] = 0; }
+    id.data.fill(255); for (const b of inkB) for (const i of b.pix) { const o = (((i / w) | 0) - by0) * bm.width + (i % w - bx0); id.data[o * 4] = id.data[o * 4 + 1] = id.data[o * 4 + 2] = 0; }
     bg.putImageData(id, 0, 0);
-    labels.push({ cx: mx / up, cy: my / up, ang: axis, len: Math.max(L, T) / up, thick: Math.min(L, T) / up, n: grp.length,
-      bm, bmx: (mx - bx0), bmy: (my - by0), up, lenU: Math.max(L, T), thickU: Math.min(L, T) });
+    labels.push({ cx: mx / up, cy: my / up, ang: axis, len: lenA / up, thick: thkA / up, n: grp.length,
+      bm, bmx: (mx - bx0), bmy: (my - by0), up, lenU: lenA, thickU: thkA });
   }
   // dimension lines: long, thin blobs (arrow lines). Axis and extent by PCA.
   S.dimLines = [];
@@ -709,13 +740,29 @@ function findTextLabels() {
   return labels.filter(l => l.n >= 1);
 }
 
+// a dimension label looks like "12", "12 in", "176.3607mm" — number first, optional unit after (kept as text, value not converted)
+// "1,019.1" / "1 019.1" / "1.019,1" -> 1019.1 ; "1,019" -> 1019 ; "715,7" -> 715.7 ; "1019 1" -> 1019.1 flagged lost (gap where the point was)
+function parseDim(raw) {
+  let t = raw.replace(/\s+/g, " ").trim().replace(/(^|[\d.,])i(?=[\d.,])/g, (_, p) => p + "1").replace(/ ?([.,]) ?/g, "$1").replace(/^[.,]+|[.,]+$/g, "");   // 'i' misread for '1'; "1019. 1"; specks at the ends
+  const ts = t.match(/^(\d{1,3})(?: \d{3})+([.,]\d+)?(?![\d.,])/);
+  if (ts && (ts[1].length === 1 || ts[2])) t = t.replace(/(\d) (?=\d{3}(?!\d))/g, "$1");                                    // 1 019.1 / 1 019 (but not "100 200")
+  if (t.includes(",") && t.includes(".")) t = t.lastIndexOf(",") > t.lastIndexOf(".") ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");   // the last separator is the decimal one
+  else if (/^\d{1,3}(,\d{3})+(?![\d,])/.test(t)) t = t.replace(/,/g, "");                                                   // 1,019
+  else t = t.replace(",", ".");                                                                                             // 715,7
+  let m = t.match(/^(\d+(?:\.\d+)?) ?([a-z]{1,3})?\.?$/i), lost = false;
+  if (!m) { m = t.match(/^(\d+) (\d{1,2})$/); if (!m) return null; m = [m[0], m[1] + "." + m[2]]; lost = true; }
+  const unit = /^(mm|cm|m|ft|in)$/i.test(m[2] || "") ? m[2].toLowerCase() : "";
+  return { text: m[1], value: parseFloat(m[1]), unit, lost };
+}
 // crop a label, rotate it level (both ways up), OCR it as one line, keep the best numeric reading
-async function readLabel(lb, worker) {
+async function readLabel(lb, worker, dimLines = S.dimLines) {
   const pad = lb.thickU * 0.6 + 4, Lw = lb.lenU + 2 * pad, Lh = lb.thickU + 2 * pad;
   const SC = Math.max(1, Math.min(8, 48 / Math.max(6, lb.thickU)));
+  // drawings are lettered to read from the bottom or the right: try that way up first (horizontal -> 0, vertical -> -90°, reads bottom-to-top)
+  let a0 = ((lb.ang % Math.PI) + Math.PI) % Math.PI; if (a0 >= Math.PI / 2 - 0.1) a0 -= Math.PI;
   let best = null;
-  for (const flip of [0, Math.PI]) {
-    const a = lb.ang + flip, c = document.createElement("canvas"); c.width = Math.ceil(Lw * SC) + 40; c.height = Math.ceil(Lh * SC) + 40;
+  for (const [flip, bonus] of [[0, 3], [Math.PI, 0]]) {
+    const a = a0 + flip, c = document.createElement("canvas"); c.width = Math.ceil(Lw * SC) + 40; c.height = Math.ceil(Lh * SC) + 40;
     const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
     g.translate(c.width / 2, c.height / 2); g.scale(SC, SC); g.rotate(-a); g.translate(-lb.bmx, -lb.bmy); g.drawImage(lb.bm, 0, 0);
     g.setTransform(1, 0, 0, 1, 0, 0);
@@ -723,12 +770,10 @@ async function readLabel(lb, worker) {
     for (let i = 0; i < p.length; i += 4) { const v = Math.min(p[i], p[i + 1], p[i + 2]) < 170 ? 0 : 255; p[i] = p[i + 1] = p[i + 2] = v; }
     g.putImageData(d, 0, 0);
     const { data } = await worker.recognize(c);
-    const txt = (data.text || "").replace(/\s+/g, " ").trim().replace(",", ".");
-    // a dimension label looks like "12", "12 in", "176.3607mm" — number first, optional unit after
-    const m = txt.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z0-9]{0,3})$/);
-    if (!m) continue;
-    const score = data.confidence + m[1].length * 3 + (m[2] ? 10 : 0);
-    if (!best || score > best.score) best = { score, text: m[1], value: parseFloat(m[1]), conf: data.confidence, raw: txt };
+    const txt = (data.text || "").replace(/\s+/g, " ").trim(), pd = parseDim(txt);
+    if (!pd) continue;
+    const score = data.confidence + bonus + pd.text.length * 3 + (pd.unit ? 10 : 0) - (pd.lost ? 15 : 0);
+    if (!best || score > best.score) best = { score, text: pd.text + (pd.unit ? " " + pd.unit : ""), value: pd.value, conf: data.confidence, raw: txt, lost: pd.lost };
     if (data.confidence > 85) break;                                   // clear reading the right way up: skip the upside-down try
   }
   if (!best || !(best.value > 0) || best.conf < 10) return null;
@@ -736,42 +781,27 @@ async function readLabel(lb, worker) {
   const ang = deg < 15 || deg > 165 ? 0 : Math.abs(deg - 90) < 15 ? 90 : deg;
   // the arrow line this number sits on: parallel, close beside the text, text centre within its length
   let span = null, bd = Infinity;
-  for (const L of S.dimLines || []) {
+  for (const L of dimLines || []) {
     let da = Math.abs(L.ang - lb.ang) % Math.PI; da = Math.min(da, Math.PI - da); if (da > 0.2) continue;
     const dx = lb.cx - L.cx, dy = lb.cy - L.cy, along = dx * Math.cos(L.ang) + dy * Math.sin(L.ang), off = Math.abs(-dx * Math.sin(L.ang) + dy * Math.cos(L.ang));
     if (Math.abs(along) > L.len / 2 || off > lb.thick * 3 + 10) continue;
     if (off < bd) { bd = off; span = L.len; }
   }
-  return { value: best.value, text: best.text, raw: best.raw, x: lb.cx, y: lb.cy, ang, conf: best.conf, span };
-}
-
-async function ocrAt(deg) {
-  const img = S.img, SCALE = Math.min(2, 1800 / Math.max(img.width, img.height));
-  const a = deg * Math.PI / 180, W = img.width * SCALE, H = img.height * SCALE;
-  const cw = Math.ceil(Math.abs(W * Math.cos(a)) + Math.abs(H * Math.sin(a))), ch = Math.ceil(Math.abs(W * Math.sin(a)) + Math.abs(H * Math.cos(a)));
-  const c = document.createElement("canvas"); c.width = cw; c.height = ch;
-  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, cw, ch);
-  g.translate(cw / 2, ch / 2); g.rotate(a); g.drawImage(img, -W / 2, -H / 2, W, H);
-  const { data } = await ocrWorker[0].recognize(c);
-  const words = data.words || [];
-  const out = [];
-  for (const wd of words) {
-    const m = (wd.text || "").replace(",", ".").match(/\d+(\.\d+)?/);
-    if (!m || wd.confidence < 70) continue;
-    const v = parseFloat(m[0]); if (!(v > 0)) continue;
-    // map the word centre back to the original image
-    const cx = (wd.bbox.x0 + wd.bbox.x1) / 2 - cw / 2, cy = (wd.bbox.y0 + wd.bbox.y1) / 2 - ch / 2;
-    const ox = (cx * Math.cos(-a) - cy * Math.sin(-a) + W / 2) / SCALE, oy = (cx * Math.sin(-a) + cy * Math.cos(-a) + H / 2) / SCALE;
-    out.push({ value: v, text: m[0], x: ox, y: oy, ang: -deg, conf: wd.confidence, len: (wd.bbox.x1 - wd.bbox.x0) / SCALE, digits: m[0].replace(".", "").length });
+  if (span == null) {   // number set in a gap of its arrow line ("|<-- 120 -->|"): two collinear halves, the closest pair wins
+    const par = (dimLines || []).filter(L => { const da = Math.abs(L.ang - lb.ang) % Math.PI; return Math.min(da, Math.PI - da) <= 0.2 && L.len >= lb.len; });
+    let bg = Infinity;
+    for (const A of par) for (const B of par) {
+      if (A === B) continue;
+      const ux = Math.cos(A.ang), uy = Math.sin(A.ang);
+      const pa = (lb.cx - A.cx) * ux + (lb.cy - A.cy) * uy, pb = (lb.cx - B.cx) * ux + (lb.cy - B.cy) * uy;
+      const oa = Math.abs((lb.cy - A.cy) * ux - (lb.cx - A.cx) * uy), ob = Math.abs((lb.cy - B.cy) * ux - (lb.cx - B.cx) * uy);
+      if (pa < A.len / 2 || -pb < B.len / 2 || oa > lb.thick + 6 || ob > lb.thick + 6) continue;   // A before the label, B after it, both on its line
+      const gap = pa - A.len / 2 - pb - B.len / 2;                                                // about the size of the text
+      if (gap > lb.len * 2.5 + 20 || gap + oa + ob >= bg) continue;
+      bg = gap + oa + ob; span = pa + A.len / 2 - pb + B.len / 2;
+    }
   }
-  return out;
-}
-// the same label read at several rotations -> keep the best reading
-function dedupe(list) {
-  list.sort((a, b) => (b.digits - a.digits) || (b.conf - a.conf));
-  const keep = [];
-  for (const d of list) { const r = Math.max(12, d.len * 0.6); if (!keep.some(k => Math.hypot(k.x - d.x, k.y - d.y) < r)) keep.push(d); }
-  return keep;
+  return { value: best.value, text: best.text, raw: best.raw, x: lb.cx, y: lb.cy, ang, conf: best.conf, span, lost: best.lost };
 }
 
 // =====================================================================================
@@ -834,18 +864,32 @@ function assignDims() {
 // (metres per drawing pixel); a value whose scale is ~10x, 100x or 1000x the others' is corrected
 // by restoring the decimal point, and flagged so the user checks it.
 function fixDecimals() {
-  const read = S.dims.filter(d => d.value > 0 && d.src === "sketch");
+  const read = S.dims.filter(d => d.value > 0 && d.src === "sketch" && measurePx(d) > 0);
   if (read.length < 2) return;
-  const sc = read.map(d => d.value / measurePx(d)), sorted = sc.slice().sort((a, b) => a - b), med = sorted[0];   // decimals are only ever lost: trust the smallest scale
+  const detOf = d => d.det != null ? S.dets[d.det] : null;
+  // reference = the scale most values agree with (within 2x), a tie goes to the smaller one (decimals are only ever lost):
+  // one too-small value (an offset, a stray "1") or one misread cannot poison the rest
+  const refOf = sc => { let bn = -1, bs = 0, bnear = null;
+    for (const s of sc) { const near = sc.filter(v => Math.abs(Math.log(v / s)) < Math.LN2); if (near.length > bn || (near.length === bn && s < bs)) { bn = near.length; bs = s; bnear = near; } }
+    return bnear.sort((a, b) => a - b)[bnear.length >> 1]; };
+  let sc = read.map(d => d.value / measurePx(d)), ref = refOf(sc);
   read.forEach((d, i) => {
-    const ratio = sc[i] / med; if (ratio < 3) return;
+    const ratio = sc[i] / ref, t = detOf(d);
+    if (ratio < 3 || (t && t.text.includes(".") && !t.lost)) return;          // only a number read without a point can have lost one; never scaled up
     for (const k of [10, 100, 1000]) if (Math.abs(ratio / k - 1) < 0.15) { d.value = +(d.value / k).toFixed(4); d.src = "fixed"; break; }
+  });
+  if (read.length < 3) return;
+  sc = read.map(d => d.value / measurePx(d)); ref = refOf(sc);
+  read.forEach((d, i) => {
+    const ratio = sc[i] / ref, t = detOf(d); if (ratio <= 5 && ratio >= 0.2) return;
+    if (!S.hasArc) { d.src = "check"; return; }                                // hand sketches are rarely to scale: only flag it
+    if (t) t.use = null; d.value = null; d.src = null; d.det = null;          // to-scale drawing, far from all others: not this dimension -> "Other numbers"
   });
 }
 
 function renderDims() {
   $("dimCard").hidden = false;
-  const missing = S.dims.filter(d => d.req && d.value == null).length, read = S.dims.filter(d => d.src === "sketch").length;
+  const missing = S.dims.filter(d => d.req && d.value == null).length, read = S.dims.filter(d => d.src === "sketch" || d.src === "fixed" || d.src === "check").length;
   const nl = S.segs.filter(s => s.t === "line").length, na = S.segs.length - nl;
   $("dimIntro").innerHTML = S.hasArc
     ? `Outline with <b>${nl} straight edge(s)</b> and <b>${na} arc(s)</b>. Needed: the <b>overall width and height</b>. Edge lengths and arc radii are optional; when given they are checked against the drawing.`
@@ -854,7 +898,7 @@ function renderDims() {
   $("dimTable").innerHTML = S.dims.map((d, k) => `<tr data-k="${k}" class="${S.hl === k ? "sel" : ""}">
       <td class="n">${dimName(d)}</td>
       <td><input type="number" step="0.01" min="0" data-k="${k}" value="${d.value ?? ""}" placeholder="${d.req ? "enter" : "optional"}"></td><td class="u">m</td>
-      <td>${d.src === "fixed" ? '<span class="tag warn" title="decimal point restored — please check">read · decimal fixed</span>' : d.src === "sketch" ? '<span class="tag ok">read from sketch</span>' : d.src === "user" ? '<span class="tag warn">entered</span>' : d.req ? '<span class="tag bad">needed</span>' : '<span class="tag" style="color:var(--muted)">optional</span>'}</td>
+      <td>${d.src === "fixed" ? '<span class="tag warn" title="decimal point restored — please check">read · decimal fixed</span>' : d.src === "check" ? '<span class="tag warn" title="does not fit the scale of the other numbers — please check">read · looks inconsistent</span>' : d.src === "sketch" ? '<span class="tag ok">read from sketch</span>' : d.src === "user" ? '<span class="tag warn">entered</span>' : d.req ? '<span class="tag bad">needed</span>' : '<span class="tag" style="color:var(--muted)">optional</span>'}</td>
       <td class="u">${S.fit && S.fit.len[k] != null ? f(S.fit.len[k]) : ""}</td></tr>`).join("");
   $("dimTable").querySelectorAll("input").forEach(el => {
     el.onchange = () => { const d = S.dims[+el.dataset.k], v = parseFloat(el.value);
@@ -895,7 +939,7 @@ function solvePolygon() {
   const s0 = ratios[ratios.length >> 1];
   const L = given.map((v, i) => v ?? drawn[i] * s0);
   const a0 = ang.slice();
-  for (let it = 0; it < 50; it++) {
+  for (let it = 0; it < 100; it++) {
     let gx = 0, gy = 0; for (let i = 0; i < n; i++) { gx += L[i] * Math.cos(ang[i]); gy += L[i] * Math.sin(ang[i]); }
     if (Math.hypot(gx, gy) < 1e-9 * (1 + s0)) break;
     // columns: δᵢ -> Lᵢ·(−sin, cos);  unknown lengths: uⱼ = εⱼ/Lⱼ -> Lⱼ·(cos, sin)
@@ -905,11 +949,13 @@ function solvePolygon() {
     let m00 = 0, m01 = 0, m11 = 0; for (const { c } of cols) { m00 += c[0] * c[0]; m01 += c[0] * c[1]; m11 += c[1] * c[1]; }
     const det = m00 * m11 - m01 * m01; if (Math.abs(det) < 1e-12) break;
     const lx = (m11 * -gx - m01 * -gy) / det, ly = (-m01 * -gx + m00 * -gy) / det;   // (AAᵀ)⁻¹(−g)
-    for (const { t, i, c } of cols) { const x = c[0] * lx + c[1] * ly; if (t === "a") ang[i] += x; else L[i] *= 1 + x; }
+    // damped step (≤ 20° per step), and a length never flips sign
+    const xs = cols.map(({ c }) => c[0] * lx + c[1] * ly), xm = Math.max(...xs.map(Math.abs)), kd = xm > 0.35 ? 0.35 / xm : 1;
+    cols.forEach(({ t, i }, j) => { const x = xs[j] * kd; if (t === "a") ang[i] += x; else L[i] *= Math.exp(x); });
   }
   const V = [[0, 0]]; for (let i = 0; i < n - 1; i++) { const p = V[i]; V.push([p[0] + L[i] * Math.cos(ang[i]), p[1] + L[i] * Math.sin(ang[i])]); }
   let gx = 0, gy = 0; for (let i = 0; i < n; i++) { gx += L[i] * Math.cos(ang[i]); gy += L[i] * Math.sin(ang[i]); }
-  const turn = ang.map((a, i) => { let d = (a - a0[i]) * 180 / Math.PI; d = ((d + 540) % 360) - 180; return d; });
+  const turn = ang.map((a, i) => { let d = (a - a0[i]) * 180 / Math.PI; d = (((d % 360) + 540) % 360) - 180; return d; });
   const bV = bounds(V), len = S.dims.map(d => d.kind === "edge" ? L[d.i] : d.kind === "width" ? bV[2] - bV[0] : bV[3] - bV[1]);
   return { V, len, turn, gap: Math.hypot(gx, gy), estimated: given.filter(v => v == null).length };
 }
@@ -949,9 +995,9 @@ $("buildBtn").onclick = () => {
       : (Math.abs(worst.e) > 3 ? `<span class="warn">Scaled with one factor. Largest mismatch: ${worst.name} ${worst.e > 0 ? "+" : ""}${f(worst.e, 1)} % — check that number or the drawing.</span>`
         : `<span class="ok">All given dimensions match the drawing within ${f(Math.abs(worst.e), 1)} % ✓</span>`);
   } else {
-    const mx = Math.max(...r.turn.map(Math.abs));
-    $("buildMsg").innerHTML = `Shape closes ✓ (gap ${f(r.gap, 3)} m). ` +
-      (mx > 2 ? `<span class="warn">The sketch is not to scale: edge directions were turned by up to ${f(mx, 1)}° so the given lengths fit together.</span>` : `<span class="ok">The sketch matches the numbers (largest angle change ${f(mx, 1)}°).</span>`) +
+    const mx = Math.max(...r.turn.map(Math.abs)), closes = r.gap <= 1e-6 * perim(r.V) + 1e-6;
+    $("buildMsg").innerHTML = (!closes ? `<span class="bad">These edge lengths cannot form a closed shape (gap ${f(r.gap, 1)} m): one of the numbers is probably misread.</span>`
+      : `Shape closes ✓ (gap ${f(r.gap, 3)} m). ` + (mx > 2 ? `<span class="warn">The sketch is not to scale: edge directions were turned by up to ${f(mx, 1)}° so the given lengths fit together.</span>` : `<span class="ok">The sketch matches the numbers (largest angle change ${f(mx, 1)}°).</span>`)) +
       (r.estimated ? `<br><span class="warn">${r.estimated} edge(s) estimated from the drawing.</span>` : "");
   }
   $("saveCard").hidden = false; S.view1 = "real"; setViewTab(); renderDims(); update1(); fitView(); draw();
@@ -977,6 +1023,7 @@ function update1() {
 $("detail").oninput = () => { if (S.raw) { makeCorners(); assignDims(); renderDims(); S.poly = null; S.fit = null; S.view1 = "sketch"; setViewTab(); fitView(); draw(); } };
 
 function resetRound1() {
+  ocrGen++; progress(0, "");                                        // any text reading still running is for the old image
   Object.assign(S, { cands: null, raw: null, px: null, segs: null, segsM: null, verts: null, hasArc: false, dims: [], dets: [], poly: null, fit: null, entry: null, view1: "sketch", mode: "idle", hl: null });
   $("dimCard").hidden = true; $("saveCard").hidden = true; $("pickBox").hidden = true; $("buildMsg").textContent = "";
 }
@@ -2434,7 +2481,7 @@ function label(text, X, Y, bg, fg = "#0f1419") {
 
 // segment of a dimension in image px (polygon edge or line/arc segment)
 function segPx(i) { return S.hasArc ? S.segs[i] : { t: "line", a: S.verts[i], b: S.verts[(i + 1) % S.verts.length] }; }
-const dimColor = d => d && d.src === "sketch" ? "#3fb68b" : d && d.src === "user" ? "#f5a623" : "#8b9bab";
+const dimColor = d => d && d.src === "sketch" ? "#3fb68b" : d && (d.src === "user" || d.src === "fixed" || d.src === "check") ? "#f5a623" : "#8b9bab";
 // draw one segment (line or arc) through a map; arcs use their sampled points
 function strokeSeg(s, map) {
   const pts = s.t === "line" ? [s.a, s.b] : sampleSegs([s], p => p).concat([s.b]);
