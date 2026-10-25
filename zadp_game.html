@@ -2128,7 +2128,8 @@ function resetSim() { stopSim(); readCfg(); SIM = newSim(S.simCfg.method, Object
 let simRun = 0, comparing = false;   // simRun: bumped by stopSim, so a background End / compare run knows it was called off
 function stopSim() { simRun++; if (simTimer) cancelAnimationFrame(simTimer); simTimer = null; $("playBtn").textContent = "▶ Play"; }
 // like runChunked (which cannot be called off), but stops without a last onProgress as soon as abort() is true
-function runBg(W, onProgress, abort, limit = 400 * 3600) {
+// (not named runBg: tools/pipeline_test.js sets window.runBg, which would replace a global function of that name)
+function runAbortable(W, onProgress, abort, limit = 400 * 3600) {
   return new Promise(res => { const tick = () => { if (abort()) return res(W); const t0 = performance.now();
     while (!W.done && W.t < limit && performance.now() - t0 < 120) stepSim(W, 1);
     onProgress && onProgress(W); if (W.done || W.t >= limit) res(W); else setTimeout(tick, 0); }; tick(); });
@@ -2178,7 +2179,7 @@ function compareAll() {
   setTimeout(async () => { try {
     const rows = [];
     for (const m of ["base", "grid", "touch"]) {
-      const W = off() ? null : await runBg(newSim(m, Object.assign({}, S.simCfg)), w => { $("cmpBox").innerHTML = `<p class="hint">Running ${METHOD_NAMES[m].split(" (")[0]}… ${w.piles.length} piles, site clock ${f(w.t / 3600, 1)} h</p>`; }, off);
+      const W = off() ? null : await runAbortable(newSim(m, Object.assign({}, S.simCfg)), w => { $("cmpBox").innerHTML = `<p class="hint">Running ${METHOD_NAMES[m].split(" (")[0]}… ${w.piles.length} piles, site clock ${f(w.t / 3600, 1)} h</p>`; }, off);
       if (off()) { $("cmpBox").innerHTML = '<p class="hint">Comparison stopped.</p>'; return; }
       rows.push({ m, s: simSummary(W), W });
     }
@@ -2275,7 +2276,7 @@ document.querySelectorAll("#speedTabs button").forEach(b => b.onclick = () => { 
 $("playBtn").onclick = () => { if (simTimer) { stopSim(); render5(); } else playSim(); };   // pause: bring the throttled panel up to date
 $("resetBtn").onclick = resetSim;
 $("endBtn").onclick = async () => { stopSim(); if (!SIM) resetSim(); const id = simRun, live = () => id === simRun && S.round === 5;
-  await runBg(SIM, () => { if (live()) { render5(); draw(); } }, () => id !== simRun);
+  await runAbortable(SIM, () => { if (live()) { render5(); draw(); } }, () => id !== simRun);
   if (live()) { render5(); draw(); } };
 $("cmpBtn").onclick = compareAll;
 $("toR5").onclick = () => setRound(5);
