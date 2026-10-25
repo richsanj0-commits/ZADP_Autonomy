@@ -80,8 +80,10 @@ Tested on circles, rounded rectangles, stadiums, D-shapes, ellipses and mixed ou
 1. **Find the text labels:** small ink blobs (characters) are grouped into labels; each label's direction is found by principal component analysis (PCA) of its pixels.
 2. **Read each label alone:** the label's own pixels are cut out on a clean white background, turned level (both ways up) and read by Tesseract as a single line. A reading must look like "number + optional unit". Several readers (one per spare CPU core, up to 4) work on different labels at the same time, and a label read with high confidence (> 85 %) the right way up is not read upside down too — Rounds 1–4 of a sketch now take about 1–2 s.
 3. **Match the number to what it measures:** each number sits on an arrow (dimension) line. The arrow line's drawn length is compared with every possible dimension (each edge, each arc radius, the overall width and height); the closest match wins. Without an arrow line, the number goes to the nearest edge.
-4. **Decimal check:** the reader sometimes drops a decimal point ("1019.1" → "10191"). Each value implies a scale (metres per pixel); a value whose scale is 10×, 100× or 1000× the others is corrected and flagged.
-5. **Ask only for what is missing:** a table lists every needed dimension, marked "read from sketch", "entered" or "needed".
+4. **Decimal points kept:** the small dot or comma blob next to a digit is kept in the label bitmap, so "1019.1" reaches the reader as written (before, the dot was filtered out as noise). Thousands separators and decimal commas are parsed ("1,019.1", "1019,1").
+5. **Decimal check:** each value implies a scale (metres per pixel). The scale most values agree on is the reference; a value whose scale is 10×, 100× or 1000× off is corrected and flagged (amber) — but never one that visibly has a decimal point. If a polygon value looks inconsistent it is only flagged, not changed.
+6. **Robust reading:** a new image cancels the reading of the previous one (no stale numbers), a failing reader is dropped while the others continue, vertical labels are tried bottom-to-top first, a dimension line broken by its own number is joined again, and a sketch whose lengths cannot close gives a clear message instead of a wrong shape.
+7. **Ask only for what is missing:** a table lists every needed dimension, marked "read from sketch", "entered" or "needed".
 
 ### 4.4 Building the real shape
 - **Polygons:** the drawing gives the edge *directions*, the numbers give the edge *lengths*. A hand sketch is rarely to scale, so the given lengths do not close. Closure condition: Σ Lᵢ (cos aᵢ, sin aᵢ) = 0. Each edge is turned by a small δᵢ (and unknown lengths may change by εᵢ) with the least total change — the minimum-norm solution of the linearised closure, x = Aᵀ(AAᵀ)⁻¹(−g), repeated until the gap is zero. The tool reports how far the sketch was from scale (e.g. "edges turned by up to 6.9°").
@@ -165,9 +167,11 @@ With one truck size, touching placement reproduces the hexagonal lattice; with a
 4. **Reachable:** a truck can drive from the gate to a stop cell next to the pile (route search on a grid of truck-centre positions).
 5. **Way out:** with this pile in place, the truck can still drive out.
 6. **Route lock:** the truck's route outside the lanes (in and out) must not cross a route reserved by another truck; the pile must not land on a reserved route.
-7. **Isolation check (Step 4):** with this pile in place, no free ground that could still take a pile becomes unreachable.
+7. **Isolation check (Step 4):** with this pile in place, no other spot that could still take a pile loses all of its stop cells (the ring of free cells a truck can reverse from). Sealing a spot is allowed only as a last resort, when the area is empty and nothing else is left.
 
-Spots that are proved impossible (unreachable, no way out) are dropped for good: piles are only ever added, so they stay impossible.
+Spots that are proved impossible (overlapping, behind a spine pile, unreachable even with no other truck inside) are dropped for good: piles are only ever added, so they stay impossible. A route blocked only by another truck's reserved route is not permanent — the zone is skipped for now and tried again later.
+
+**Spine last, correctly:** a spine pile is allowed only when no usable zone or branch spot is left within its reach (the same reach the lane rule uses). Zones behind the entry line (concave sites, slanted entries) are reached through the gate mouth, so the spine waits for them too.
 
 ### 8.3 Driving on the roads
 Routes are found on a grid of truck-centre positions with A*. Spine and branch centre lines are cheap to drive on (cost 0.35 against 1 on open ground), so trucks drive the spine, turn onto their zone's branch and only leave the road for the last stretch to the pile; the path is then straightened (no staircase steps). Along a straight spine the truck drives the exact centre line.
@@ -175,14 +179,15 @@ Routes are found on a grid of truck-centre positions with A*. Spine and branch c
 ### 8.4 Moving the trucks safely (Step 5)
 - **One-way lanes (Rule 1):** trucks drive *along* a lane only on its centre line and only in its direction; the other lane may only be crossed sideways.
 - **Wait gate (Rule 3):** at most N trucks inside (default = number of zones).
-- **Lane mutex:** the lanes plus a safety strip beside them hold one *moving* truck at a time. The holder never waits for anyone — its lane path is empty and its route outside the lanes is reserved for it — so it always gets through.
-- **Reserved routes:** each truck's whole round trip outside the lanes is reserved while it works and released when it is back in the lane. Reserved routes never overlap.
-- **Truck ahead:** a truck stops if another truck is on the next stretch of its own route.
+- **Lane mutex:** the lanes plus a safety strip beside them (including the **gate mouth**, the strip where trucks turn in at the entry) hold one *moving* truck at a time.
+- **Reserved routes:** each truck's whole round trip outside the lanes is reserved while it works and released when it is back in the lane. Reserved routes never overlap; the gate-mouth cells a live route uses are remembered too, so no pile can land on them.
+- **Truck ahead:** a truck stops if another truck is ahead of it on the next stretch of its own route. There is no "right of way": a truck never drives into a truck that stands on its path, and every single step is also checked against a minimum body clearance.
+- **Gate:** a truck enters only when the previous one has left the gate point.
 
-**Why there can be no collision:** in the lanes only one truck moves; outside the lanes each truck stays on its own reserved route, and reserved routes are disjoint.
-**Why there can be no deadlock:** the only waiting is for the lane mutex or the gate. The mutex holder never waits, so it always finishes and releases it; a truck waiting at the gate holds nothing.
+**Why there can be no collision:** in the lanes only one truck moves; outside the lanes each truck stays on its own reserved route, reserved routes are disjoint, and a truck never makes a step that brings it closer than half a metre to another truck's body.
+**Deadlocks:** waiting is for the lane mutex, the gate or a truck ahead. A wait cycle (A waits for B … waits for A) lasting a minute is counted as a deadlock and broken (the youngest truck of the cycle yields; its load is counted on its reserved spot). In all verification runs no such cycle happened.
 
-Both are also **measured**, not assumed: a collision is two truck bodies overlapping; a deadlock is no truck able to move for 10 minutes.
+Both are **measured**, not assumed: a collision is two truck bodies overlapping anywhere on the site (also behind the entry line); a deadlock is a wait cycle, or every truck inside stuck for 10 minutes.
 
 ### 8.5 Settings and output
 Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), haul cycle (load + travel to the loader and back, 15 min, ±15 % random), first departures every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all three" runs every method on the same truck sequence.
@@ -214,14 +219,26 @@ Fleet used in all tests: 363 t hauler (pile r 6.35 m, 15.1 × 9.75 m, 2 trucks) 
 
 Fleet: **5 × 300 t** (13.5 × 8 m, pile r 5.96 m), **6 × 500 t** (17 × 10 m, r 7.06 m), **1 × 1000 t** (22 × 12 m, r 8.90 m) — 12 trucks, each looping with a 15-min haul cycle. Seed 7, spacing 0 (touching). Entry chosen by **Best entry** (full dispatch runs; the default entry in brackets).
 
-| Site | Baseline (fixed) | Grid + remove | **Touching (ZADP)** | Touching, default entry | Collisions / deadlocks | Fill time |
-|---|---|---|---|---|---|---|
-| Valley fill, 50 acres | 16.9 % | 33.9 % | **76.3 %** | 68.6 % | 0 / 0 | 49 h |
-| Pit-edge crescent, 80 acres | 16.0 % | 33.1 % | **74.6 %** | 73.1 % | 0 / 0 | 95 h |
-| Two lobes + neck, 120 acres | 16.8 % | 34.3 % | **76.5 %** | 67.1 % | 0 / 0 | 173 h |
-| Waste dump with notch, 150 acres | 17.4 % | 34.8 % | **76.7 %** | 70.4 % | 0 / 0 | 175 h |
+| Site (entry edge) | Baseline (fixed) | Grid + remove | **Touching (ZADP)** | Collisions / deadlocks | Fill time |
+|---|---|---|---|---|---|
+| Valley fill, 50 acres (e12) | 16.9 % | 34.5 % | **75.7 %** | 0 / 0 | 48 h |
+| Pit-edge crescent, 80 acres (e40) | 16.9 % | 35.1 % | **75.4 %** | 0 / 0 | 95 h |
+| Two lobes + neck, 120 acres (e31) | 16.4 % | 36.0 % | **75.8 %** | 0 / 0 | 165 h |
+| Waste dump with notch, 150 acres (e9) | 17.3 % | 34.6 % | **76.9 %** | 0 / 0 | 170 h |
 
-With a real fleet ZADP fills **75–77 %** of every site (about 4.5× fixed spot points and 2.2× a grid with removal), with no collision or deadlock. The entry choice alone is worth up to 9 points. Two fixes made this possible: a truck size marked "full" is re-checked before the run ends (the spine spots had been left empty), and the Best entry search.
+(Final version after the bug hunt, Round 1 now reading the decimals from the sketches. Collisions are counted anywhere on the site.)
+
+With a real fleet ZADP fills **75–77 %** of every site (about 4.5× fixed spot points and 2.2× a grid with removal), with no collision or deadlock.
+
+**Any entry is now safe and nearly as good.** Before the bug hunt the result depended strongly on the entry edge, and some edges were unsafe. After it:
+
+| Case | Before | After |
+|---|---|---|
+| Valley 50 ac, default entry | 68.6 % | **74.8 %** |
+| Crescent 80 ac, edge 35 (slanted spine, zones behind the entry line) | 52 %, 1–2 collisions | **75.9 %**, 0 / 0 |
+| Crescent 80 ac, edge 39 (58 m spine) | 36.4 %, 33 collisions, 1193 deadlocks | **78.0 %**, 0 / 0 (slow: 153 h) |
+
+Best entry still helps mainly with fill time (a long spine shortens every truck's trip).
 
 ### 9.2 Seventeen test shapes (seed 7, final version)
 
@@ -242,6 +259,7 @@ A simulation number like "77 %" is only convincing next to the **best that is ma
 - A pile centre may only be in the safe zone (Step 1), so piles can only ever cover the *coverable ground* C = (safe zone grown by the pile radius) ∩ dump area.
 - Equal circles that only touch can cover at most **π / (2√3) = 90.69 %** of any region (Thue's theorem, proved by Fejes Tóth, 1940s). This is a proof, not a simulation.
 - So for touching piles: **max coverage = 0.9069 × C / dump area.** With overlapping piles the cap is C / dump area.
+- With a mixed fleet the tool grows the safe zone by the *largest* pile radius (the biggest piles reach furthest past it), so C is never underestimated. Strictly, circles of two very different sizes can pack slightly denser than 90.69 % (Blind, 1969), so for such fleets the figure is labelled an *equal-circle estimate* rather than a hard cap.
 
 For the 50-acre valley fill: C = 97.6 % of the area, so the touching bound is **88.5 %**. ZADP reaches **76.9 %**, which is **87 % of the theoretical maximum**.
 
@@ -276,13 +294,17 @@ These changes came out of testing and are useful for the paper's discussion:
 | Boustrophedon gave only 1–2 cells on smooth shapes | Partition before the lane; bays sized from the trucks; spine and branches (herringbone) |
 | Branches sealed by their first pile row | Branch spots filled far end first across the whole road width |
 | Big areas too slow | A* route search, cached reachability, spot caching, sliced runs |
+| Collisions from some entry edges (crescent): the "gate mouth" exemption covered every shallow cell, so routes there were not reserved; a truck could also pass a waiting truck ("older goes first"); collisions behind the entry line were not even counted | Found by a multi-agent bug hunt (45 verified findings). Mouth = lane-side strip only; never drive into a truck + per-step clearance; collisions counted everywhere; wait cycles detected. The worst edge went from 36 % with 33 collisions to 78 % with none |
+| Round 1 dropped decimal points ("715.7" read as "715"), a new image could receive the previous image's numbers, and one-corner shapes broke the outline | Dot blobs kept in the label bitmap, a generation counter on every reading, a split opposite a single corner. All five site sketches now read exactly (715.7 / 336.3, 1019.1 / 574.6, …) |
+| Changing the site, fleet or entry could leave Round 5 simulating an old plan; Best entry or the demo could be started twice | A plan key on Round 4 (re-planned when anything changes), guarded Best entry and demo, cancellable "Run to end" / "Compare", session saves the entry with its sweep |
+| Spots lost to temporary conditions (another truck's route, a first-in-order spot used as "deepest", an isolation test that was really a size limit) | Temporary blocks no longer kill spots; deepest usable spot; ring-based isolation test. Default-entry coverage on the 50-acre site 68.6 % → 74.8 %, runs 3–5× faster |
 
 ---
 
 ## 11. Limitations and future work
 
 - **Open safety case:** on very small areas where a narrow neck sits right at the entry (the dumbbell test), trucks entering and leaving can still meet at the gate mouth; mine-scale sites passed. Fix planned: lock the gate mouth together with the spine.
-- **Some entry edges are unsafe:** from a few non-default entry edges (seen on the 80-acre crescent, an edge with a diagonal spine) the dispatcher let trucks touch (1–2 collisions per run). The default entry and the edges Best entry keeps are verified at 0 / 0; Best entry rejects any edge whose run has a collision. Root cause not yet found.
+- **Short spines:** an entry whose straight spine stops far short of the far side (e.g. 58 m on the 80-acre crescent) is safe and still fills the area, but slowly (150 h instead of 95 h), because every truck shares the gate mouth. Best entry skips such edges.
 - **Haul cycle:** one average cycle time with ±15 % random spread for every truck; loader queues and haul-road traffic are not modelled.
 - **2D only:** piles are circles; real piles spread unevenly and settle. Pile height and the dump crest are not modelled.
 - **Grid routing:** truck positions use a grid of about half a truck width; turning circles are not modelled exactly (the truck reverses to its pile from a free cell next to it).

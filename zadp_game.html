@@ -2293,7 +2293,7 @@ function compareAll() {
     const best = Math.max(...rows.map(r => r.s.cov));
     $("cmpBox").innerHTML = `<table class="dims"><tr><td class="n">Method</td><td class="u">piles</td><td class="u">cover %</td><td class="u">hours</td><td class="u">coll.</td><td class="u">dead.</td></tr>${rows.map(r =>
       `<tr${r.s.cov === best ? ' class="sel"' : ""}><td class="n">${METHOD_NAMES[r.m].split(" (")[0]}</td><td>${r.s.piles}</td><td><b>${f(r.s.cov, 1)}</b></td><td>${f(r.s.hours, 1)}</td><td>${r.s.collisions}</td><td>${r.s.deadlocks}</td></tr>`).join("")}</table>
-      <p class="hint">Same area, same fleet, same truck arrival sequence (seed ${S.simCfg.seed}). Click a method above and ▶ Play to watch it.</p>`;
+      <p class="hint">Same area, same fleet, same departure order and the same haul-time draws for every truck (seed ${S.simCfg.seed}). Click a method above and ▶ Play to watch it.</p>`;
     const sel = rows.find(r => r.m === S.simCfg.method); SIM = sel.W; render5(); draw();
   } catch (e) { console.error(e); $("cmpBox").innerHTML = '<p class="hint bad">Comparison failed — see the console.</p>'; }
   finally { comparing = false; $("cmpBtn").disabled = false; } }, 30);
