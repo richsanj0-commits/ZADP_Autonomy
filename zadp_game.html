@@ -1304,7 +1304,7 @@ function run4() {
     }
     zones.push({ poly: half, branch, bay: bay.cell, depth: depthOf(centroidOf(half), F), dc });
   }
-  zones.sort((p, q) => q.depth - p.depth);                           // back-to-front: deepest bay first
+  zones.sort((p, q) => Math.abs(q.depth) - Math.abs(p.depth));       // back-to-front: farthest bay from the entry line first (zones behind it too)
   zones.forEach((z, i) => z.n = i + 1);
   const branches = zones.flatMap(z => z.branch);
   const region = pieces(clip(zones.map(z => z.poly), branches, CT().ctDifference));   // pile area (outside spine and branches)
@@ -1325,7 +1325,7 @@ function run4() {
       const zp = [];
       for (const piece of pieces(clip([z.poly], z.branch, CT().ctDifference)))
         zp.push(...hexIn(piece, rowDeg, r, gap, (p, pts) => insideArea(p) && clear(p, lane.poly) && clear(p, branches) && freeOf(p, pts)));
-      zp.sort((p, q) => depthOf(q, F) - depthOf(p, F) || Math.abs(latOf0(q, F)) - Math.abs(latOf0(p, F)));
+      zp.sort((p, q) => Math.abs(depthOf(q, F)) - Math.abs(depthOf(p, F)) || Math.abs(latOf0(q, F)) - Math.abs(latOf0(p, F)));
       for (const p of zp) seq.push(put(p, { zone: z.n, kind: "zone", depth: depthOf(p, F) }));
       nZ += zp.length;
       // the zone's branch, far end first
@@ -1341,7 +1341,7 @@ function run4() {
     for (const L of laneSafe) for (const p of hexIn(L, S.sweep, r, gap, (p, pts) => insideArea(p) && freeOf(p, pts))) lanePts.push(put(p, { zone: 0, kind: "lane", depth: depthOf(p, F) }));
     lanePts.sort((p, q) => q.depth - p.depth);
     let last = -1;
-    for (const L of lanePts) { let pos = -1; seq.forEach((s, i) => { if (s.kind !== "lane" && s.depth >= L.depth) pos = i; }); pos = Math.max(pos, last); seq.splice(pos + 1, 0, L); last = pos + 1; }
+    for (const L of lanePts) { let pos = -1; seq.forEach((s, i) => { if (s.kind !== "lane" && Math.abs(s.depth) >= L.depth) pos = i; }); pos = Math.max(pos, last); seq.splice(pos + 1, 0, L); last = pos + 1; }
     seq.forEach((s, i) => { s.order = i + 1; s.lane = s.kind === "lane"; });
     const covA = gap >= 0 ? seq.length * Math.PI * r * r      // circles never overlap at spacing >= 0 and stay inside the area
       : sumArea(clip(clip(seq.map(s => Array.from({ length: 24 }, (_, k) => [s.p[0] + r * Math.cos(k * Math.PI / 12), s.p[1] + r * Math.sin(k * Math.PI / 12)])), [], CT().ctUnion), [S.poly], CT().ctIntersection));
@@ -1530,15 +1530,16 @@ function newSim(method, cfg) {
     t: 0, piles: [], hash: new PileHash(2 * rmax + gmax + 1), trucks: [], queue: [], nextArrival: 0, lastRelease: -1e9,
     locked: new Map(), full: new Set(), done: false, rand: rng(cfg.seed), tid: 0,
     stats: { collisions: 0, deadlocks: 0, skipped: 0, turnedAway: 0, maxWait: 0, waitSum: 0, released: 0 }, pairs: new Set(),
-    regionCache: new Map(), stuckFor: 0, fillTime: null, version: 0, failVer: null, minLaneDepth: Infinity, resv: new Map(), mutex: null,
+    regionCache: new Map(), stuckFor: 0, fillTime: null, version: 0, failVer: null, minLaneDepth: Infinity, resv: new Map(), mres: new Map(), mutex: null,
   };
   W.maxIn = cfg.maxIn > 0 ? cfg.maxIn : Math.max(1, R.zones.length);
   // the real fleet: every truck from Round 2, each looping pit -> dump -> pit
   W.units = []; let u = 0;
-  S.fleet.forEach((t, k) => { for (let i = 0; i < Math.max(1, +t.count || 1); i++) W.units.push({ uid: ++u, name: "T" + u, ty: types[k], state: "away", back: 0, loads: 0 }); });
+  S.fleet.forEach((t, k) => { for (let i = 0; i < Math.max(1, +t.count || 1); i++) { const id = ++u; W.units.push({ uid: id, name: "T" + id, ty: types[k], state: "away", back: 0, loads: 0, rand: rng(cfg.seed * 7919 + id) }); } });
   for (let i = W.units.length - 1; i > 0; i--) { const j = Math.floor(W.rand() * (i + 1)); [W.units[i], W.units[j]] = [W.units[j], W.units[i]]; }   // random departure order
   W.units.forEach((un, i) => un.back = i * cfg.every);
   buildRouteGrid(W);
+  W.gate = laneAt(W, -1, 0).map((v, i) => v - F.n[i] * 25); W.exit = laneAt(W, 1, 0).map((v, i) => v - F.n[i] * 25);
   if (method === "grid") W.baseSpots = R.grids[smallest.id].spots.map(s => ({ c: s.p, kind: s.kind || (s.lane ? "lane" : "zone"), order: s.order }));
   if (method === "base") W.baseSpots = fixedSpots(W);
   return W;
@@ -1603,6 +1604,10 @@ function buildRouteGrid(W) {
   G.need = new Uint8Array(nx * ny);
   for (let k = 0; k < nx * ny; k++) { if (!G.base[k]) continue; if (G.side[k]) { G.need[k] = 1; continue; }
     const c = cellXY(G, k); if (inLane.some(L => distToEdges(c, L) < half + 0.75 * cs + 0.5)) G.need[k] = 1; }
+  // gate mouth: the lane-side strip at the entry. Always under the lane mutex, so routes there are not halo-reserved
+  // (counted in W.mres instead, so no pile lands on a mouth cell a live route uses)
+  G.mouth = new Uint8Array(nx * ny);
+  for (let k = 0; k < nx * ny; k++) if (G.base[k] && G.need[k] && !G.side[k] && G.depth[k] < 3 * cs) G.mouth[k] = 1;
   // lane centre lines: the only cells where a truck may drive ALONG a lane (body stays inside its own half)
   G.core = new Int8Array(nx * ny);
   for (let k = 0; k < nx * ny; k++) if (G.side[k]) { const lat = latOf(W, cellXY(G, k)); if (Math.abs(lat - G.side[k] * w / 2) <= cs * 0.75) G.core[k] = G.side[k]; }
@@ -1686,7 +1691,7 @@ function checkSpot(W, ty, c, kind, pre = false, zz = null) {
   else if (kind === "branch") { if (W.minLaneDepth <= dep + r) return "lane"; if (zoneHasSpot(W, z)) return "zone first"; }   // branch fills after its zone, like water rising
   else {
     if (W.trucks.length) return "busy";                                                   // last phase: lane spots one truck at a time
-    if (deepestZone(W) > dep) return "zone deeper";
+    if (deepestZone(W) + W.smallest.r >= dep) return "zone deeper";                      // same reach as the lane rule
   }
   const sc = stopCell(W, c, r, W.Wmax, kind === "zone", true); if (sc < 0) return "unreachable";   // reach maps: one search per change, not per spot
   return { zone: z, stop: sc };
@@ -1694,9 +1699,11 @@ function checkSpot(W, ty, c, kind, pre = false, zz = null) {
 // cells (outside the lanes) a truck body passes over along a path
 function routeCells(W, path) {
   const G = W.G, n = Math.ceil(W.Wmax / 2 / G.cs), out = new Set();
-  for (const p of path) { const k = cellAt(G, p); if (k < 0 || !G.base[k] || G.side[k] || G.depth[k] < 3 * G.cs) continue;    // lane cells and the gate mouth: covered by the lane mutex
+  out.mouth = new Set();
+  for (const p of path) { const k = cellAt(G, p); if (k < 0 || !G.base[k] || G.side[k]) continue;    // lane cells: covered by the lane mutex
+    if (G.mouth[k]) { out.mouth.add(k); continue; }                                                  // gate mouth: mutex too, but remembered
     const ci = k % G.nx, cj = (k / G.nx) | 0;
-    for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const q = j * G.nx + i; if (G.base[q] && !G.side[q] && G.depth[q] >= 3 * G.cs) out.add(q); } }
+    for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const q = j * G.nx + i; if (G.base[q] && !G.side[q]) (G.mouth[q] ? out.mouth : out).add(q); } }
   return out;
 }
 function densify(path, step) {
@@ -1707,41 +1714,55 @@ function densify(path, step) {
 }
 // does zone z still have a free, reachable pile spot (smallest truck)? cached until something changes
 function zoneHasSpot(W, z) {
-  const key = W.version + "|" + W.piles.length; if (!W._zh || W._zh.key !== key) W._zh = { key, m: new Map() };
+  const key = W.version + "|" + W.piles.length + "|" + (W.isoN || 0); if (!W._zh || W._zh.key !== key) W._zh = { key, m: new Map() };
   if (W._zh.m.has(z)) return W._zh.m.get(z);
   const o = findSpot(W, W.smallest, { kind: "zone", quick: true, zone: z }); W._zh.m.set(z, !!o); return !!o;
 }
 // Isolation check (Step 4): with this footprint blocked, how much free ground can no longer be reached from the gate?
 // More than a pile-plus-truck pocket means the pile would seal off usable space -> try another spot.
-function cutsOff(W, foot) {
+function cutsOff(W, foot, c, nty) {
   reachMaps(W); const G = W.G;
   const saved = foot.map(k => G.free[k]); foot.forEach(k => G.free[k] = 0);
   const d = bfs(G, G.inStart, k => G.free[k], G.mvIn);
   foot.forEach((k, i) => G.free[k] = saved[i]);
   const footSet = new Set(foot), cut = new Set();
   for (let k = 0; k < d.length; k++) if (G.distIn[k] >= 0 && d[k] < 0 && !footSet.has(k)) cut.add(k);
-  if (cut.size <= Math.PI * (W.smallest.r + W.Wmax) ** 2 / (G.cs * G.cs)) return false;   // pocket too small for any pile + truck
-  // a bigger cut-off region only matters if some free pile spot could still be served from it
-  const ty = W.smallest, C = W.cc && W.cc.get(ty.id); if (!C) return true;
+  if (!cut.size) return false;
+  // the cut-off ground only matters if some pile spot could still be served from it (and nowhere else)
+  const ty = W.smallest; candidates(W, ty, {}); const C = W.cc.get(ty.id);   // always fresh: never depends on who scanned it before
   const R = ty.r + W.Wmax / 2, n = Math.ceil((R + 2 * G.cs) / G.cs);
   let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
   for (const k of cut) { const p = cellXY(G, k); bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); }
   const m = R + 3 * G.cs;
   for (const o of C.list) {
-    if (o.dead || o.kind === "lane" || o.c[0] < bx0 - m || o.c[0] > bx1 + m || o.c[1] < by0 - m || o.c[1] > by1 + m) continue;
-    const ci = Math.round((o.c[0] - G.x0) / G.cs), cj = Math.round((o.c[1] - G.y0) / G.cs);
-    let near = false;
-    for (let j = cj - n; j <= cj + n && !near; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; if (cut.has(j * G.nx + i)) { near = true; break; } }
-    if (!near) continue;
+    if (o.dead || o.kind === "lane" || W.minLaneDepth <= o.depth + ty.r || o.c[0] < bx0 - m || o.c[0] > bx1 + m || o.c[1] < by0 - m || o.c[1] > by1 + m) continue;
+    if (Math.hypot(o.c[0] - c[0], o.c[1] - c[1]) < ty.r + nty.r + gapOf(W, ty, nty) - 1e-3) continue;   // covered by the new pile anyway
     if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
-    return true;                                                       // a usable spot would be sealed off
+    // its stop ring (same ring as stopCell): sealed if every usable stop cell is in the cut-off ground
+    const ci = Math.round((o.c[0] - G.x0) / G.cs), cj = Math.round((o.c[1] - G.y0) / G.cs); let sealed = false, open = false;
+    for (let j = cj - n; j <= cj + n && !open; j++) for (let i = ci - n; i <= ci + n; i++) {
+      if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; const k = j * G.nx + i;
+      if (!G.free[k] || footSet.has(k) || (o.kind === "zone" && G.need[k]) || G.distIn[k] < 0 || G.distOut[k] < 0) continue;
+      const dd = Math.hypot(G.x0 + i * G.cs - o.c[0], G.y0 + j * G.cs - o.c[1]); if (dd < R || dd > R + 1.6 * G.cs) continue;
+      if (cut.has(k)) sealed = true; else if (d[k] >= 0) { open = true; break; }
+    }
+    if (sealed && !open) return true;                                  // a usable spot would be sealed off
   }
   return false;
 }
 function deepestZone(W) {
-  const key = W.version + "|" + W.piles.length; if (W._dz && W._dz.key === key) return W._dz.v;
-  const o = findSpot(W, W.smallest, { kind: "zone", quick: true }), ob = findSpot(W, W.smallest, { kind: "branch", quick: true });
-  W._dz = { key, v: Math.max(o ? o.depth : -Infinity, ob ? ob.depth : -Infinity) }; return W._dz.v;
+  const key = W.version + "|" + W.piles.length + "|" + (W.isoN || 0); if (W._dz && W._dz.key === key) return W._dz.v;
+  const ty = W.smallest, acc = o => o.depth < 0 ? Infinity : o.depth;      // behind the entry line: reached through the mouth
+  const list = candidates(W, ty, {}).filter(o => !o.dead && o.kind !== "lane").sort((a, b) => acc(b) - acc(a));   // a copy: fill order untouched
+  let v = -Infinity;
+  for (const o of list) {
+    if (W.minLaneDepth <= o.depth + ty.r) { o.dead = true; continue; }
+    if (o.isoAt === W.piles.length) continue;
+    if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
+    if (stopCell(W, o.c, ty.r, W.Wmax, o.kind === "zone", true) < 0) continue;
+    v = acc(o); break;                                                  // deepest usable spot
+  }
+  W._dz = { key, v }; return v;
 }
 // Fill order = a clean front toward each access road:
 //  zones deepest first; inside a zone, rows farthest from its branch first, each row far end first;
@@ -1751,7 +1772,7 @@ function sortKeys(W, o) {
   const z = o.kind === "lane" ? null : W.R.zones.find(q => q.n === o.z);
   if (o.kind === "lane") { o.k1 = 1e6; o.k2 = o.depth; }
   else if (o.kind === "branch") { o.k1 = (z ? z.n : 999) + 0.5; o.k2 = 0; }
-  else { o.k1 = z ? z.n : 999; o.k2 = z && z.dc != null && z.branch && z.branch.length ? Math.abs(o.depth - z.dc) : o.depth; }
+  else { o.k1 = z ? z.n : 999; o.k2 = z && z.dc != null && z.branch && z.branch.length ? Math.abs(o.depth - z.dc) : Math.abs(o.depth); }
   o.sd = o.depth;
 }
 function candidates(W, ty, opts) {
@@ -1767,7 +1788,9 @@ function candidates(W, ty, opts) {
   if (C.n < W.piles.length) {                                   // piles never move: update only around the new ones
     const fresh = W.piles.slice(C.n); C.n = W.piles.length;
     C.list = C.list.filter(o => fresh.every(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) >= ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3));
-    if (W.method === "touch") { const add = touchAround(W, ty, fresh); add.forEach(o => sortKeys(W, o)); C.list.push(...add); C.dirty = true; }
+    if (W.method === "touch") {
+      const ovl = o => W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3);
+      const add = touchAround(W, ty, fresh).filter(o => !ovl(o)); add.forEach(o => sortKeys(W, o)); C.list.push(...add); C.dirty = true; }
   }
   if (C.dirty) {
     if (W.method === "grid") C.list.sort((a, b) => a.order - b.order);
@@ -1785,7 +1808,7 @@ function pocketsFirst(W, ty, list) {
   if (W.method !== "touch" || ty.r >= W.rmax - 1e-6) return list;
   const big = W.types.reduce((a, b) => a.r >= b.r ? a : b), pockets = []; let n = 0;
   for (const o of list) {
-    if (o.dead || W.locked.has(o.z) || o.kind !== "zone") continue; if (++n > 250) break;
+    if (o.dead || W.locked.has(o.z) || o.kind !== "zone" || W.minLaneDepth <= o.depth + ty.r) continue; if (++n > 250) break;
     const fitsBig = !W.hash.near(o.c, big.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < big.r + q.r + gapOf(W, big, q.ty) - 1e-3);
     if (!fitsBig) pockets.push(o);
   }
@@ -1793,15 +1816,18 @@ function pocketsFirst(W, ty, list) {
   const set = new Set(pockets); return [...pockets, ...list.filter(o => !set.has(o))];
 }
 function findSpot(W, ty, opts = {}) {
-  let busy = 0; const jammed = new Set();      // zones whose access route is taken right now: skip their other spots
+  let busy = 0, isoFb = null; const jammed = new Set();      // zones whose access route is taken right now: skip their other spots
+  const noHalo = f => { const h = W.halo; W.halo = null; try { return f(); } finally { W.halo = h; } };   // is a route blocked only by other trucks' routes?
 
   for (const o of (opts.quick ? candidates(W, ty, opts) : pocketsFirst(W, ty, candidates(W, ty, opts)))) {
     if (o.dead) continue;                     // proved impossible earlier (piles only ever add, so it stays impossible)
+    if (o.isoAt === W.piles.length) continue; // refused by the isolation check since the last pile
     if (opts.quick) { // used by the lane rule: is there still any free, reachable zone spot deeper?
       if (o.kind !== "lane" && W.minLaneDepth <= o.depth + ty.r) { o.dead = true; continue; }   // behind a spine pile: can never be reached again
       if (opts.zone != null && o.z !== opts.zone) continue;
       if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
-      if (stopCell(W, o.c, ty.r, W.Wmax, true, true) < 0) continue;
+      if (stopCell(W, o.c, ty.r, W.Wmax, o.kind === "zone", true) < 0) continue;
+      if (cutsOff(W, footprint(W, o.c, ty.r), o.c, ty)) { o.isoAt = W.piles.length; W.isoN = (W.isoN || 0) + 1; continue; }   // a spot the dispatcher would refuse is no reason to wait
       return o;
     }
     if (W.locked.has(o.z) || jammed.has(o.z)) continue;                 // locked / jammed zone: skip cheaply
@@ -1811,26 +1837,30 @@ function findSpot(W, ty, opts = {}) {
       // isolation check (Step 4): the new pile must not land on another truck's reserved route,
       // and this truck must still have a way out once its own pile is down
       const foot = footprint(W, o.c, ty.r);
-      if (foot.some(k => W.resv.has(k)) || W.resv.has(res.stop)) continue;            // cheap rejections: no route search needed
+      if (foot.some(k => W.resv.has(k) || W.mres.has(k)) || W.resv.has(res.stop)) continue;   // cheap rejections: no route search needed
       // cheap pre-check: the straight line from the spine to the stop must not run through another truck's reserved route
       { const lp = laneAt(W, -1, depthOf(cellXY(W.G, res.stop), W.F)), sp = cellXY(W.G, res.stop); let hit = false;
         for (let t = 0.15; t <= 1 && !hit; t += 0.1) { const k = cellAt(W.G, [lp[0] + (sp[0] - lp[0]) * t, lp[1] + (sp[1] - lp[1]) * t]); if (k >= 0 && W.resv.has(k)) hit = true; }
         if (hit) { jammed.add(o.z); continue; } }
       if (++busy > 12 && W.trucks.length) { W.capped = true; return null; }          // limit route searches while trucks are inside (retry soon); exhaustive when the area is empty
-      const pin0 = routeIn(W, res.stop); if (!pin0) { W.stats.skipped++; o.dead = true; continue; }
+      // a route blocked only by other trucks' reserved routes is not permanent: skip the zone for now (tested once per pile count)
+      const pin0 = routeIn(W, res.stop);
+      if (!pin0) { if (o.nhIn !== W.piles.length) { o.nhIn = W.piles.length; if (!noHalo(() => routeIn(W, res.stop))) { W.stats.skipped++; o.dead = true; continue; } } jammed.add(o.z); continue; }
       const pin = densify(pin0, W.G.cs);
       const saved = foot.map(k => W.G.free[k]); foot.forEach(k => W.G.free[k] = 0);
-      const ro = routeOut(W, res.stop);
+      const ro = routeOut(W, res.stop), ro2 = ro || o.nhOut === W.piles.length || noHalo(() => routeOut(W, res.stop));
       foot.forEach((k, i) => W.G.free[k] = saved[i]);
-      if (!ro) { W.stats.skipped++; o.dead = true; continue; }
+      if (!ro) { o.nhOut = W.piles.length; if (!ro2) { W.stats.skipped++; o.dead = true; continue; } jammed.add(o.z); continue; }
       const pout = densify(ro.path.slice(0, ro.laneIdx + 1), W.G.cs);
       const cells = routeCells(W, [...pin, ...pout]);
       if ([...cells].some(k => W.resv.has(k))) { jammed.add(o.z); continue; }
-      if (cutsOff(W, foot)) { W.stats.isolation = (W.stats.isolation || 0) + 1; continue; }
+      if (cutsOff(W, foot, o.c, ty)) { W.stats.isolation = (W.stats.isolation || 0) + 1; o.isoAt = W.piles.length; W.isoN = (W.isoN || 0) + 1; if (!isoFb) isoFb = { o, res, pin, cells, ro }; continue; }
       return Object.assign(o, res, { pin, cells, ro });
     }
     if (res === "unreachable") { W.stats.skipped++; o.dead = true; }
+    else if (res === "overlap" || res === "lane") o.dead = true;       // piles only add and the spine only fills: permanent
   }
+  if (isoFb && !W.trucks.length) return Object.assign(isoFb.o, isoFb.res, { pin: isoFb.pin, cells: isoFb.cells, ro: isoFb.ro });   // sealing only as a last resort
   return null;
 }
 // touching placement: every point where a new circle (radius r) touches two piles, a pile and an edge, or two edges
@@ -1874,6 +1904,7 @@ function release(W, ty) {
   const tr = { id: ++W.tid, ty, spot: pile, phase: "in", wait: 0, stop: o.stop, born: W.t };
   W.version++; refreshReach(W);
   tr.path = o.pin; tr.cells = o.cells; tr.ro = o.ro; for (const k of o.cells) W.resv.set(k, tr.id);
+  for (const k of o.cells.mouth || []) W.mres.set(k, (W.mres.get(k) || 0) + 1);
   haloAdd(W, o.cells, 1);
   tr.pos = tr.path[0].slice(); tr.wp = 1; tr.heading = Math.atan2(W.F.n[1], W.F.n[0]);
   W.trucks.push(tr); return tr;
@@ -1925,12 +1956,13 @@ function smoothPath(W, pts) {
   return out;
 }
 function routeIn(W, stop) {
-  const G = W.G, d = depthOf(cellXY(G, stop), W.F), gate = laneAt(W, -1, 0).map((v, i) => v - W.F.n[i] * 25);
+  const G = W.G, d = depthOf(cellXY(G, stop), W.F), gate = W.gate;
   for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
     const k0 = nearestFree(W, laneAt(W, -1, dd), -1); if (k0 < 0) continue;
     let tail = astar(G, k0, stop, k => routeOk(W, k), G.mvIn); if (!tail) continue;
     tail = smoothPath(W, tail);
-    return [gate, ...lanePath(W, -1, k0), ...tail.slice(1)];
+    const lp = lanePath(W, -1, k0); if (!lp) continue;
+    return [gate, ...lp, ...tail.slice(1)];
   }
   return null;                                                          // not reachable now
 }
@@ -1940,21 +1972,23 @@ function lanePath(W, side, k) {
   { const a = laneAt(W, side, 0), b = cellXY(G, k), d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(d / (G.cs * 0.5)); let ok = true;   // straight along the lane centre if possible
     for (let i = 1; i < n && ok; i++) { const q = cellAt(G, [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]); if (q < 0 || G.side[q] !== side || !G.free[q]) ok = false; }
     if (ok) return [a, b]; }
-  const key = side + "|" + W.minLaneDepth; W._lp ??= {};
+  const key = side + "|" + W.minLaneDepth + "|" + W.piles.length; W._lp ??= {};
   if (!W._lp[key]) W._lp[key] = bfs(G, starts.filter(q => G.core[q] === side), q => G.core[q] === side && G.free[q]);
   const dist = W._lp[key];
   if (dist[k] < 0) { const k2 = nearestFree(W, cellXY(G, k), side); if (k2 >= 0 && dist[k2] >= 0) return [...traceWith(G, dist, () => true, k2).reverse(), cellXY(G, k)]; }
-  if (dist[k] < 0) return [laneAt(W, side, 0), cellXY(G, k)];
+  if (dist[k] < 0) { const s = starts.find(q => G.free[q] && G.core[q] === side);   // lane centre broken: a checked detour, never a straight jump
+    return s != null ? astar(G, s, k, q => routeOk(W, q), side < 0 ? G.mvIn : G.mvOut) : null; }
   return traceWith(G, dist, () => true, k).reverse();
 }
 // OUT: stop -> to the OUT lane at the same depth -> along the OUT lane to the exit
 function routeOut(W, from) {
-  const G = W.G, d = depthOf(cellXY(G, from), W.F), exit = laneAt(W, 1, 0).map((v, i) => v - W.F.n[i] * 25);
+  const G = W.G, d = depthOf(cellXY(G, from), W.F), exit = W.exit;
   for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
     const k1 = nearestFree(W, laneAt(W, 1, dd), 1); if (k1 < 0) continue;
     let head = astar(G, from, k1, k => routeOk(W, k) || k === from, G.mvOut); if (!head) continue;   // the truck's own cell is always usable
     head = smoothPath(W, head);
-    return { path: [...head, ...lanePath(W, 1, k1).reverse().slice(1), exit], laneIdx: head.length - 1 };
+    const lp = lanePath(W, 1, k1); if (!lp) continue;
+    return { path: [...head, ...lp.reverse().slice(1), exit], laneIdx: head.length - 1 };
   }
   return null;                                                           // no way out right now: wait and retry
 }
@@ -1965,26 +1999,34 @@ function stepSim(W, dt) {
     if (W.full.has(un.ty.id)) { un.state = "parked"; continue; }
     un.state = "queue"; W.queue.push({ ty: un.ty, at: W.t, unit: un });
   }
-  // gate (Rule 3): enter only if fewer than maxIn inside, with a headway
-  if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway && W.failVer !== W.version + ":" + W.queue[0].ty.id && W.failVer !== "retry@" + Math.floor(W.t / 30)) {
-    W.capped = false;
-    const q = W.queue[0], tr = release(W, q.ty);
-    if (!tr) W.failVer = W.capped ? "retry@" + Math.floor(W.t / 30) : W.version + ":" + q.ty.id;   // a capped search is retried every 30 s
-    if (tr) { tr.unit = q.unit; if (q.unit) q.unit.state = "inside"; W.queue.shift(); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); }
-    else if (!W.trucks.length) {                                   // nothing inside and still no spot: this truck size cannot fit any more
-      W.full.add(q.ty.id); W.queue = W.queue.filter(z => { if (z.ty.id === q.ty.id) { W.stats.turnedAway++; if (z.unit) z.unit.state = "parked"; return false; } return true; });
-      if (W.full.size === W.types.length && W.recheckVer !== W.version) {   // before ending: a type marked full earlier may fit again now
-        W.recheckVer = W.version;
-        for (const t of W.types) if (findSpot(W, t)) { W.full.delete(t.id); for (const un of W.units) if (un.ty === t && un.state === "parked") { un.state = "away"; un.back = W.t; } }
+  // a size marked full may fit again once the area is empty and something changed (smallest first)
+  const recheck = () => { W.recheckVer = W.version;
+    for (const t of [...W.types].sort((a, b) => a.r - b.r)) if (W.full.has(t.id) && findSpot(W, t)) { W.full.delete(t.id); for (const un of W.units) if (un.ty === t && un.state === "parked") { un.state = "away"; un.back = W.t; } } };
+  if (W.full.size && !W.allFull && !W.trucks.length && W.recheckVer !== W.version) recheck();
+  // gate (Rule 3): enter only if fewer than maxIn inside, with a headway; every truck size in the queue is tried in turn
+  if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway) {
+    W.failAt ??= new Map(); const tried = new Set();
+    for (let i = 0; i < W.queue.length; i++) {
+      const q = W.queue[i], id = q.ty.id; if (tried.has(id)) continue; tried.add(id);
+      if (W.trucks.some(o => o.phase === "in" && Math.hypot(o.pos[0] - W.gate[0], o.pos[1] - W.gate[1]) < (o.ty.L + q.ty.L) / 2 + 2)) break;   // the last truck has not left the gate
+      const fa = W.failAt.get(id); if (fa && (fa.capped ? W.t - fa.t < 10 : fa.v === W.version)) continue;   // nothing changed since it failed
+      W.capped = false; const tr = release(W, q.ty);
+      if (tr) { tr.unit = q.unit; if (q.unit) q.unit.state = "inside"; W.queue.splice(i, 1); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); break; }
+      W.failAt.set(id, { v: W.version, capped: W.capped, t: W.t });
+      if (W.capped) break;                                         // search budget used: retry soon
+      if (!W.trucks.length) {                                      // nothing inside and still no spot: this truck size cannot fit any more
+        W.full.add(id); W.queue = W.queue.filter(z => { if (z.ty.id === id) { W.stats.turnedAway++; if (z.unit) z.unit.state = "parked"; return false; } return true; });
+        if (W.full.size === W.types.length && W.recheckVer !== W.version) recheck();   // before ending: a size marked full earlier may fit again now
+        if (W.full.size === W.types.length) { W.allFull = true; W.queue = []; }
+        break;
       }
-      if (W.full.size === W.types.length) { W.allFull = true; W.queue = []; }
     }
   }
   // move trucks
   let moved = false;
   for (const tr of W.trucks) {
     if (tr.phase === "man" || tr.phase === "dump") {
-      tr.wait -= dt; moved = true;
+      tr.wait -= dt; moved = true; tr.waitFor = null;
       if (tr.wait > 0) continue;
       if (tr.phase === "man") { tr.phase = "dump"; tr.wait = cfg.tDump; continue; }
       if (tr.spot.state !== "placed") { tr.spot.state = "placed"; W.version++; refreshReach(W); }
@@ -2000,15 +2042,19 @@ function stepSim(W, dt) {
     }
     // car following: wait if another truck is just ahead
     const tgt = tr.path[tr.wp], hd = Math.atan2(tgt[1] - tr.pos[1], tgt[0] - tr.pos[0]);
+    // never drive into a truck: wait for every truck on the next stretch (a head-on pair is a wait cycle, broken below)
     const block = W.trucks.find(o => o !== tr && o.phase !== "gone" && inMyWay(tr, o));
-    if (block && !(block.id > tr.id && inMyWay(block, tr))) { tr.blocked = (tr.blocked || 0) + dt; continue; }   // mutual: the older truck goes first
+    if (block) { tr.blocked = (tr.blocked || 0) + dt; tr.waitFor = block; continue; }
     // ---- lane rules as 1-D stretches along each lane (works for lanes at any angle) ----
-    if (!laneOk(W, tr, tgt)) { tr.blocked = (tr.blocked || 0) + dt; continue; }
-    tr.blocked = 0;
+    if (!laneOk(W, tr, tgt)) { tr.blocked = (tr.blocked || 0) + dt; tr.waitFor = W.mutex; continue; }
+    tr.blocked = 0; tr.waitFor = null;
     let step = v * dt;
     while (step > 0 && tr.wp < tr.path.length) {
       const p = tr.path[tr.wp], d = Math.hypot(p[0] - tr.pos[0], p[1] - tr.pos[1]);
       if (d > 1e-9 && !laneOk(W, tr, p)) break;                     // checked at every cell entered
+      const np = d <= step ? p : [tr.pos[0] + (p[0] - tr.pos[0]) * step / d, tr.pos[1] + (p[1] - tr.pos[1]) * step / d];
+      const hit = W.trucks.find(o => o !== tr && o.phase !== "gone" && tooClose(tr, np, o));
+      if (hit) { tr.waitFor = hit; tr.blocked = (tr.blocked || 0) + dt; break; }   // hard guard: no step that closes in on a truck body
       if (d > 1e-9) tr.heading = Math.atan2(p[1] - tr.pos[1], p[0] - tr.pos[0]);
       if (d <= step) { tr.pos = p.slice(); step -= d; tr.wp++; } else { tr.pos = [tr.pos[0] + (p[0] - tr.pos[0]) * step / d, tr.pos[1] + (p[1] - tr.pos[1]) * step / d]; step = 0; }
     }
@@ -2016,24 +2062,34 @@ function stepSim(W, dt) {
     if (tr.phase === "out" && tr.zoneOpen !== true && tr.wp > tr.unlockAt) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); tr.zoneOpen = true; W.version++; }   // back in the lane: zone + route free
     moved = true;
   }
-  W.trucks = W.trucks.filter(tr => { if (tr.phase === "gone" && tr.unit) { const un = tr.unit; un.loads++; un.state = "away"; un.back = W.t + cfg.cycle * 60 * (0.85 + 0.3 * W.rand()); }
+  W.trucks = W.trucks.filter(tr => { if (tr.phase === "gone" && tr.unit) { const un = tr.unit; un.loads++; un.state = "away"; un.back = W.t + cfg.cycle * 60 * (0.85 + 0.3 * un.rand()); }
     if (tr.phase === "gone") { if (!tr.zoneOpen) { W.locked.delete(tr.spot.zone); freeRoute(W, tr); } if (W.mutex === tr) W.mutex = null; W.version++; return false; } return true; });
   // safety measurement: two trucks overlapping = collision (counted once per pair)
   for (let i = 0; i < W.trucks.length; i++) for (let j = i + 1; j < W.trucks.length; j++) {
     const a = W.trucks[i], b = W.trucks[j], key = a.id + "-" + b.id;
-    if (Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) < (a.ty.W + b.ty.W) / 2 * 0.8 && depthOf(a.pos, W.F) > 0 && depthOf(b.pos, W.F) > 0) { if (!W.pairs.has(key)) { W.pairs.add(key); W.stats.collisions++; } }
+    if (Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) < (a.ty.W + b.ty.W) / 2 * 0.8) { if (!W.pairs.has(key)) { W.pairs.add(key); W.stats.collisions++; } }   // everywhere, behind the entry line too
   }
-  // deadlock: trucks inside but none can move for 10 minutes
+  // deadlock: a wait cycle (A waits for B ... waits for A) for a minute, or every truck inside stuck for 10 minutes
+  for (const tr of W.trucks) { let o = tr.waitFor, n = 0; while (o && o !== tr && W.trucks.includes(o) && n++ < W.trucks.length) o = o.waitFor; tr.cyc = o === tr && (tr.blocked || 0) > 0 ? (tr.cyc || 0) + dt : 0; }
+  const cyc = W.trucks.filter(tr => tr.cyc > 60);
   W.stuckFor = W.trucks.length && W.trucks.every(tr => (tr.blocked || 0) > 0) ? W.stuckFor + dt : 0;
-  if (W.stuckFor > 600) { W.stats.deadlocks++; W.trucks.forEach(tr => tr.blocked = 0); W.stuckFor = 0; W.trucks.sort((a, b) => a.id - b.id)[0].phase = "gone"; }
+  if (cyc.length || W.stuckFor > 600) {
+    W.stats.deadlocks++; W.stuckFor = 0;
+    const pool = cyc.length ? cyc : W.trucks, v = pool.reduce((a, b) => a.id > b.id ? a : b);     // the youngest truck yields
+    W.trucks.forEach(t => { t.blocked = 0; t.cyc = 0; t.waitFor = null; });
+    if (v.spot.state !== "placed") { v.spot.state = "placed"; W.stats.forcedDumps = (W.stats.forcedDumps || 0) + 1; W.version++; refreshReach(W); }   // its load ends on its reserved spot
+    v.phase = "gone"; v.wp = v.path.length;
+    if (!v.zoneOpen) { W.locked.delete(v.spot.zone); freeRoute(W, v); v.zoneOpen = true; }
+    if (W.mutex === v) W.mutex = null;
+    W.trucks = W.trucks.filter(t => t !== v); if (v.unit) { v.unit.loads++; v.unit.state = "away"; v.unit.back = W.t + cfg.cycle * 60 * (0.85 + 0.3 * v.unit.rand()); }
+  }
   W.t += dt;
   if (W.allFull && !W.trucks.length && !W.done) { W.done = true; W.fillTime = W.t; }
 }
 // Lane mutex: the lanes plus a safety strip beside them ("need" cells) may hold only one MOVING truck at a time.
-// The holder never waits for anyone (its lane path is empty, its route outside the lanes is reserved),
-// so it always gets through and hands the lanes on: no collision and no circular wait is possible.
+// The holder can still wait for a truck on its path (car following); such a wait cycle is caught by the deadlock check.
 const needAt = (W, p) => { const k = cellAt(W.G, p), d = depthOf(p, W.F);
-  if (k < 0 || !W.G.base[k]) return d > -24 && d < 3 * W.G.cs ? 1 : 0;      // the gate mouth (between the gate point and the lane) belongs to the lanes
+  if (k < 0 || !W.G.base[k]) return d > -24 && d < 3 * W.G.cs && Math.abs(latOf(W, p)) < W.lane.w + W.Wmax ? 1 : 0;   // the gate mouth (between the gate point and the lane) belongs to the lanes
   return W.G.need[k]; };
 function laneOk(W, tr, p) {
   if (!needAt(W, p)) return true;
@@ -2045,7 +2101,9 @@ function releaseLanes(W, tr) {
   const next = tr.path[tr.wp];
   if (!needAt(W, tr.pos) && (!next || !needAt(W, next))) W.mutex = null;
 }
-function freeRoute(W, tr) { if (tr.cells && !tr.haloFreed) { haloAdd(W, tr.cells, -1); tr.haloFreed = true; } for (const k of tr.cells || []) if (W.resv.get(k) === tr.id) W.resv.delete(k); }
+function freeRoute(W, tr) { if (tr.cells && !tr.haloFreed) { haloAdd(W, tr.cells, -1); tr.haloFreed = true;
+    for (const k of tr.cells.mouth || []) { const n = (W.mres.get(k) || 0) - 1; if (n > 0) W.mres.set(k, n); else W.mres.delete(k); } }
+  for (const k of tr.cells || []) if (W.resv.get(k) === tr.id) W.resv.delete(k); }
 function haloAdd(W, cells, sgn) {
   const G = W.G; if (!W.halo) W.halo = new Int16Array(G.nx * G.ny);
   const n = Math.ceil(W.Wmax / 2 / G.cs);
@@ -2053,25 +2111,27 @@ function haloAdd(W, cells, sgn) {
     for (let j = cj - n; j <= cj + n; j++) for (let i = ci - n; i <= ci + n; i++) { if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue; W.halo[j * G.nx + i] += sgn; } }
 }
 // a route may use a cell if it is free ground and not within half a truck of another truck's reserved route (lanes are handled by the lane mutex)
-const routeOk = (W, k) => W.G.free[k] && (W.G.side[k] || W.G.depth[k] < 3 * W.G.cs || !W.halo || W.halo[k] <= 0);
+const routeOk = (W, k) => W.G.free[k] && (W.G.side[k] || W.G.mouth[k] || !W.halo || W.halo[k] <= 0);
 // is truck o on the next stretch of tr's actual route (its length + 4 m ahead)?
 function inMyWay(tr, o) {
   if (!tr.path || tr.wp >= tr.path.length || tr.phase === "man" || tr.phase === "dump") return false;
   const look = (tr.ty.L + o.ty.L) / 2 + 4, clear = (tr.ty.W + o.ty.W) / 2 * 0.9;
   let a = tr.pos, run = 0;
+  const n0 = tr.path[tr.wp], L0 = Math.hypot(n0[0] - a[0], n0[1] - a[1]), dir = L0 > 1e-9 ? [(n0[0] - a[0]) / L0, (n0[1] - a[1]) / L0] : [Math.cos(tr.heading), Math.sin(tr.heading)];
+  const ahead = (o.pos[0] - a[0]) * dir[0] + (o.pos[1] - a[1]) * dir[1] > 0;      // trucks behind us never block us (they wait for us)
   for (let i = tr.wp; i < tr.path.length && run < look; i++) {
     const b = tr.path[i], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (L > 1e-9 && segDist(o.pos, a, b) < clear && Math.hypot(o.pos[0] - a[0], o.pos[1] - a[1]) > 1e-6) {
-      // ignore a truck that is behind us on this segment
       const along = ((o.pos[0] - a[0]) * (b[0] - a[0]) + (o.pos[1] - a[1]) * (b[1] - a[1])) / L;
-      if (along > 0 || i > tr.wp) return true;
+      if (i === tr.wp ? along > 0 : ahead) return true;
     }
     run += L; a = b;
   }
   return false;
 }
-function blocksBack(o, tr) { const hd = Math.atan2(o.path[o.wp]?.[1] - o.pos[1], o.path[o.wp]?.[0] - o.pos[0]); const dx = tr.pos[0] - o.pos[0], dy = tr.pos[1] - o.pos[1];
-  return Math.abs(((Math.atan2(dy, dx) - hd + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) < 0.9; }   // mutual block: the older truck (lower id) goes first
+// a step to np is refused if it brings tr's body within half a metre of another truck's body (and closer than now)
+function tooClose(tr, np, o) { const lim = (tr.ty.W + o.ty.W) / 2 + 0.5, dn = Math.hypot(o.pos[0] - np[0], o.pos[1] - np[1]);
+  return dn < lim && dn < Math.hypot(o.pos[0] - tr.pos[0], o.pos[1] - tr.pos[1]) - 1e-6; }
 
 function simCoverage(W, placedOnly = true) {
   const ps = W.piles.filter(q => !placedOnly || q.state === "placed"); if (!ps.length) return 0;

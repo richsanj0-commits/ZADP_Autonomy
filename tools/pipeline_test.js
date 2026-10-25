@@ -71,3 +71,11 @@ window.finalBg = (list) => { window.__fin = {}; window.__finBusy = true;
     r.r5.overlap2 = `${s.cov.toFixed(1)}% ${s.piles}p ${s.hours.toFixed(0)}h c${s.collisions} d${s.deadlocks}${W.done ? "" : " NOTDONE"}`;
     S.fleet.forEach(t => S.gap[t.id] = 0);
     window.__fin[fn] = r; } catch (e) { window.__fin[fn] = { error: String(e) }; } } window.__finBusy = false; })(); return "started"; };
+// one site from a chosen entry edge (null = default), one method; returns the summary + timing
+window.runEdge = async (fn, edge = null, method = "touch", seed = 7) => {
+  const r = await pipe(fn, [], []); if (r.note) return r;
+  if (edge != null) { const p = S.poly, a = p[edge], b = p[(edge + 1) % p.length]; S.entry = { i: edge, pt: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; S.sweep = sweepAlongEntry(); run4(); }
+  const t0 = performance.now(), W = await runChunked(newSim(method, Object.assign({}, S.simCfg, { seed }))), s = simSummary(W); window.__W = W;
+  return { fn, edge: S.entry.i, sweep: S.sweep, zones: S.r4.zones.length, cov: +s.cov.toFixed(1), piles: s.piles, h: +s.hours.toFixed(0), c: s.collisions, d: s.deadlocks, forced: s.forcedDumps || 0, done: W.done, sec: Math.round((performance.now() - t0) / 1000) };
+};
+window.runList = (list) => { window.__rl = []; window.__rlBusy = true; (async () => { for (const [fn, e, m] of list) { try { window.__rl.push(await runEdge(fn, e, m)); } catch (err) { window.__rl.push({ fn, e, error: String(err && err.stack || err) }); } } window.__rlBusy = false; })(); return "started"; };
