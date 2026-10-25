@@ -694,6 +694,17 @@ function findTextLabels() {
       const gx = cs.reduce((s, c) => s + c[0], 0) / cs.length, gy = cs.reduce((s, c) => s + c[1], 0) / cs.length;
       let cxx = 0, cyy = 0, cxy = 0; for (const [x, y] of cs) { cxx += (x - gx) ** 2; cyy += (y - gy) ** 2; cxy += (x - gx) * (y - gy); }
       if (Math.sqrt(cxx + cyy) / cs.length > ch * 0.15) axis = Math.abs(Math.sin(0.5 * Math.atan2(2 * cxy, cxx - cyy) - ang)) > Math.SQRT1_2 ? ang + Math.PI / 2 : ang;
+      // short label (about as long as tall, e.g. "11"): the pixel axis follows the glyph shapes and is tilted (~10°, the reader
+      // then sees "1"), so take the line through the middles of its full-height glyphs (digits, not "in" / "mm")
+      if (Math.max(L, T) < 1.6 * Math.min(L, T)) {
+        const ca1 = Math.cos(axis), sa1 = Math.sin(axis), gm = (gl.length >= 2 ? gl : grp).map(b => { let s = 0, v0 = 1e9, v1 = -1e9;
+          for (const i of b.pix) { const dx = i % w - mx, dy = ((i / w) | 0) - my, v = -dx * sa1 + dy * ca1; s += dx * ca1 + dy * sa1; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+          return [s / b.pix.length, (v0 + v1) / 2, v1 - v0]; });
+        const hm = Math.max(...gm.map(e => e[2])), tl = gm.filter(e => e[2] >= hm * 0.85);
+        if (tl.length >= 2) { const um = tl.reduce((s, e) => s + e[0], 0) / tl.length, vm = tl.reduce((s, e) => s + e[1], 0) / tl.length; let suu = 0, suv = 0;
+          for (const [u, v] of tl) { suu += (u - um) ** 2; suv += (u - um) * (v - vm); }
+          const tilt = Math.atan2(suv, suu); if (suu > (ch * 0.3) ** 2 && Math.abs(tilt) < 0.35) axis += tilt; }
+      }
     }
     const cb = Math.cos(axis), sb = Math.sin(axis);
     // dashed / dash-dot lines: every blob is a thin stroke lying along the group's axis (digits stand across it); a lone thin stroke too
@@ -985,8 +996,8 @@ $("buildBtn").onclick = () => {
         : `<span class="ok">All given dimensions match the drawing within ${f(Math.abs(worst.e), 1)} % ✓</span>`);
   } else {
     const mx = Math.max(...r.turn.map(Math.abs)), closes = r.gap <= 1e-6 * perim(r.V) + 1e-6;
-    $("buildMsg").innerHTML = (closes ? `Shape closes ✓ (gap ${f(r.gap, 3)} m). ` : `<span class="bad">These edge lengths cannot form a closed shape (gap ${f(r.gap, 1)} m): one of the numbers is probably misread.</span> `) +
-      (mx > 2 ? `<span class="warn">The sketch is not to scale: edge directions were turned by up to ${f(mx, 1)}° so the given lengths fit together.</span>` : `<span class="ok">The sketch matches the numbers (largest angle change ${f(mx, 1)}°).</span>`) +
+    $("buildMsg").innerHTML = (!closes ? `<span class="bad">These edge lengths cannot form a closed shape (gap ${f(r.gap, 1)} m): one of the numbers is probably misread.</span>`
+      : `Shape closes ✓ (gap ${f(r.gap, 3)} m). ` + (mx > 2 ? `<span class="warn">The sketch is not to scale: edge directions were turned by up to ${f(mx, 1)}° so the given lengths fit together.</span>` : `<span class="ok">The sketch matches the numbers (largest angle change ${f(mx, 1)}°).</span>`)) +
       (r.estimated ? `<br><span class="warn">${r.estimated} edge(s) estimated from the drawing.</span>` : "");
   }
   $("saveCard").hidden = false; S.view1 = "real"; setViewTab(); renderDims(); update1(); fitView(); draw();
