@@ -165,3 +165,18 @@ window.expStep = async (ms = 25000) => {
   }
   return "running " + (EXP.cur ? EXP.cur.fn + " " + EXP.cur.kind : "") + " | done " + EXP.out.length + " | left " + EXP.q.length;
 };
+// turning-radius audit: wraps release(); every vertex of every dispatched route must satisfy
+// turn angle <= (adjacent distance) / Rt (discrete curvature), or be a recorded three-point turn.
+// The corner into the dump spot (in) and out of it (out) are the reverse-in manoeuvre and are exempt.
+window.auditTurns = () => {
+  const A = window.__turnAudit = { routes: 0, corners: 0, smooth: 0, sharp: 0, kturns: 0 };
+  if (!window.__relOrig) window.__relOrig = release;
+  window.release = function (W, ty) { const tr = __relOrig(W, ty); if (!tr) return tr; A.routes++; A.kturns += tr.kturns || 0;
+    for (const [pts, end] of [[tr.path, "in"], [tr.ro.path, "out"]]) { const P = simplifyPath(pts);
+      for (let i = 1; i < P.length - 1; i++) { if ((end === "in" && i === P.length - 2) || (end === "out" && i === 1)) continue;
+        const a = P[i - 1], b = P[i], c = P[i + 1]; let d = Math.abs(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0])) % (2 * Math.PI); if (d > Math.PI) d = 2 * Math.PI - d;
+        if (d < 0.02) continue; A.corners++;
+        const room = (Math.hypot(b[0] - a[0], b[1] - a[1]) + Math.hypot(c[0] - b[0], c[1] - b[1])) / 2;
+        if (d <= room / ty.Rt * 1.05) A.smooth++; else A.sharp++; } } return tr; };
+  return A;
+};

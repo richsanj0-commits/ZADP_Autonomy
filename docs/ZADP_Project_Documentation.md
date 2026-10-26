@@ -23,6 +23,22 @@ That is a **2.4× density gap**. It exists because today's systems (e.g. Caterpi
 
 **Goal:** fill any dump polygon close to human density while guaranteeing that no truck leaves the boundary, no two trucks collide, no deadlock happens, and no pile ever blocks access to the rest of the area.
 
+### 1A. How ZADP answers the problem statement (Optimal Dump Packing)
+
+The full problem statement is in [Problem_Statement_Optimal_Dump_Packing.pdf](Problem_Statement_Optimal_Dump_Packing.pdf). ZADP is a solution of **Option #2**: a dump plan (zones, fill sequence, spine and branch roads) that guides a mixed fleet, while each truck's spot point and lane are set dynamically on arrival.
+
+| Requirement (problem statement) | How ZADP meets it | Evidence |
+|---|---|---|
+| Packing density near staffed operations | Touching piles packed against the existing ones; overlap mode for merged piles like staffed dumping | 75–76 % (touching) on 3 of 4 sites, 67 % on the concave crescent; 92–94 % with 2 m overlap; vs 16–18 % for 7.38 m spot points and 22–25 % for 3.03 m (9.1c) |
+| Operational limits of the trucks (turning radius) | Arcs of each truck's turning radius, three-point turns only where there is room, reverse-in dump manoeuvre (8.3) | Audit of every route corner in every run: none tighter than the radius |
+| Multiple trucks dump concurrently | One truck per zone at a time, routes reserved, up to one truck per zone inside | Up to 12 trucks working; zone panel |
+| Trucks must not hit each other | Lane mutex, reserved disjoint routes, no-pass car following, per-step clearance (8.4) | 0 collisions in every run, measured anywhere on the site |
+| Trucks must not deadlock | Waits only for mutex / gate / truck ahead; wait cycles detected | 0 deadlocks in every run |
+| No part of a truck outside the polygon | Minkowski erosion by the truck's own margins (Step 1); route grid only where the truck body fits | Built into the geometry |
+| No pile may isolate part of the polygon | Isolation check: a pile is refused if it seals the stop cells of a spot that could still be used (8.2) | Saturated layouts, nothing reachable left (9A) |
+| Density for arbitrary truck sequences (mixed fleet) | Spots set per truck on arrival; tested with random, big-first, small-first and alternating orders | 75.7–79.4 % (valley), 66.8–68.0 % (crescent) for every order (9.1c) |
+| Trucks may dump close to prior piles (perception) | Piles are a shared map; touching placement uses it | Assumed, as allowed by the statement |
+
 ---
 
 ## 2. The ZADP method (five steps)
@@ -173,8 +189,14 @@ Spots that are proved impossible (overlapping, behind a spine pile, unreachable 
 
 **Spine last, correctly:** a spine pile is allowed only when no usable zone or branch spot is left within its reach (the same reach the lane rule uses). Zones behind the entry line (concave sites, slanted entries) are reached through the gate mouth, so the spine waits for them too.
 
-### 8.3 Driving on the roads
-Routes are found on a grid of truck-centre positions with A*. Spine and branch centre lines are cheap to drive on (cost 0.35 against 1 on open ground), so trucks drive the spine, turn onto their zone's branch and only leave the road for the last stretch to the pile; the path is then straightened (no staircase steps). Along a straight spine the truck drives the exact centre line.
+### 8.3 Driving on the roads — with the trucks' turning radius
+The problem statement requires the trucks' operational limits (turning radius) to be respected. Every truck type has a turning radius R (entered in Round 2, or 1.2 × truck length by default — 16 m for a 13.5 m truck, 26 m for a 22 m truck).
+
+1. **Smooth path first (Dubins "arc + straight"):** the truck drives its IN lane to a departure point, leaves it on one arc of exactly radius R, and drives straight to the dump spot; the way out is the mirror image (straight, one arc of radius R onto the OUT lane). Every departure point along the lane and both turning directions are tried; the shortest path that runs over free ground, outside other trucks' reserved routes, and crosses the other lane only briefly is used. A spot right beside the lane is reached by stopping on the lane next to it and reversing straight in.
+2. **Fallback:** a grid route (A*, then straightened). Each corner is rounded with an arc of radius R if the arc fits and runs over free ground; a corner that is too sharp becomes a **three-point turn** — allowed only where a free circle of half a truck length is clear around the corner (that circle is reserved with the route) and it costs 30 s. Otherwise the route is refused and the spot is tried another way.
+3. **The dump manoeuvre:** the final corner into the dump spot and the first corner out of it are the reverse-in / pull-out manoeuvre (60 s).
+
+**Audit:** every route of every run is checked: each corner must turn no tighter than the truck's radius (turn angle ≤ adjacent distance / R) or be a recorded three-point turn. In all verification runs this held for every corner.
 
 ### 8.4 Moving the trucks safely (Step 5)
 - **One-way lanes (Rule 1):** trucks drive *along* a lane only on its centre line and only in its direction; the other lane may only be crossed sideways.
@@ -190,7 +212,11 @@ Routes are found on a grid of truck-centre positions with A*. Spine and branch c
 Both are **measured**, not assumed: a collision is two truck bodies overlapping anywhere on the site (also behind the entry line); a deadlock is a wait cycle, or every truck inside stuck for 10 minutes.
 
 ### 8.5 Settings and output
-Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), haul cycle (load + travel to the loader and back, 15 min, ±15 % random), first departures every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all three" runs every method on the same truck sequence.
+Speed in the dump area (default 20 km/h), manoeuvre time (60 s), dump time (60 s), haul cycle (load + travel to the loader and back, 15 min, ±15 % random), first departures every 60 s, maximum trucks inside, random seed. Playback at 1×–10× (1× = one minute of site time per second). Live: piles per truck type, coverage, trucks inside and waiting, waiting time, collisions, deadlocks, time to fill. "Compare all methods" runs every method with the same fleet, departure order and haul-time draws.
+
+**Methods (all with the same safety rules):** Baseline — fixed square spot grid, 7.38 m between piles (today's autonomous practice); Staffed spacing — the same grid at 3.03 m; Staggered and Radial — the alternative spot patterns named in the problem statement (7.38 m); Grid + remove; Touching (ZADP).
+
+**Truck order at the gate** (the "arbitrary sequences" requirement): random mix (the fleet loop), big trucks first, small trucks first, or alternating sizes.
 
 **Real fleet:** only the trucks entered in Round 2 operate (e.g. 5 × 300 t, 6 × 500 t, 1 × 1000 t = 12 trucks). Each one loops: leaves the loader, joins the gate queue, dumps, drives out, and comes back one haul cycle later. The queue can never hold more trucks than the fleet. The **Trucks** panel lists every truck with its type, state (at the loader / waiting at gate / inside – driving in, reversing, dumping, leaving / parked) and loads delivered. A truck size is "parked" when no spot is left for it; before the run ends every parked size is checked once more, because spots can open again after other piles finish.
 
@@ -239,6 +265,32 @@ With a real fleet ZADP fills **75–77 %** of every site (about 4.5× fixed spot
 | Crescent 80 ac, edge 39 (58 m spine) | 36.4 %, 33 collisions, 1193 deadlocks | **78.0 %**, 0 / 0 (slow: 153 h) |
 
 Best entry still helps mainly with fill time (a long spine shortens every truck's trip).
+
+### 9.1c Problem-statement benchmarks, truck orders and turning radius (final version)
+
+Same real fleet (5 × 300 t, 6 × 500 t, 1 × 1000 t; turning radii 16.2 / 20.4 / 26.4 m = 1.2 × length), seed 7, best entry per site. **All runs: 0 collisions, 0 deadlocks, and every route corner within the truck's turning radius or a recorded three-point turn.**
+
+| Site (entry) | Baseline 7.38 m | Staffed 3.03 m | Staggered | Radial | Grid + remove | **ZADP (touching)** | Fill time |
+|---|---|---|---|---|---|---|---|
+| Valley 50 ac (e12) | 16.6 % | 23.3 % | 17.9 % | 17.7 % | 33.5 % | **75.9 %** | 45 h |
+| Crescent 80 ac (e58) | 17.9 % | 22.0 % | 16.4 % | 15.5 % | 31.0 % | **67.4 %** | 55 h |
+| Two lobes 120 ac (e31) | 15.9 % | 25.0 % | 20.1 % | 17.7 % | 33.7 % | **76.0 %** | 158 h |
+| Waste dump 150 ac (e9) | 16.7 % | 24.1 % | 20.6 % | 18.3 % | 31.7 % | **76.1 %** | 158 h |
+
+Three-point turns per load: 0.09 (valley), 0.40 (crescent), 0.14 (lobes), 0.22 (waste dump); every other turn is a smooth arc. The turning radius costs ≤ 1 point on three sites; on the concave crescent it costs about 8 points (75.4 % → 67.4 %), because piles can remove the only smooth approach to spots in the arms.
+
+**Note on "staffed spacing":** a fixed grid with 3.03 m *between piles* reaches only 22–25 %. Staffed operations reach ~95 % because operators let piles merge; that is ZADP's overlap mode (92–94 %), not a wider-spaced grid.
+
+**Arbitrary truck sequences** (touching, with turning radius, entries as above; all 0 collisions / 0 deadlocks, turning audit passed):
+
+| Truck order | Valley 50 ac (e12) | Crescent 80 ac (e58) |
+|---|---|---|
+| Random mix (fleet loop) | 75.9 % (45 h) | 67.4 % (55 h) |
+| Big trucks first | 79.4 % (203 h) | 66.8 % (281 h) |
+| Small trucks first | 78.6 % (100 h) | 68.0 % (134 h) |
+| Alternating sizes | 75.7 % (45 h) | 67.1 % (57 h) |
+
+The density holds for every order (spread ≤ 3.7 points); only the fill time changes (big-first is slow because the single 1000 t truck works alone first).
 
 ### 9.2 Seventeen test shapes (seed 7, final version)
 
@@ -307,11 +359,11 @@ These changes came out of testing and are useful for the paper's discussion:
 - **Short spines:** an entry whose straight spine stops far short of the far side (e.g. 58 m on the 80-acre crescent) is safe and still fills the area, but slowly (150 h instead of 95 h), because every truck shares the gate mouth. Best entry skips such edges.
 - **Haul cycle:** one average cycle time with ±15 % random spread for every truck; loader queues and haul-road traffic are not modelled.
 - **2D only:** piles are circles; real piles spread unevenly and settle. Pile height and the dump crest are not modelled.
-- **Grid routing:** truck positions use a grid of about half a truck width; turning circles are not modelled exactly (the truck reverses to its pile from a free cell next to it).
+- **Turning:** turning radius is modelled with arcs and three-point turns (8.3); truck heading during the reverse-in manoeuvre is not animated, it is covered by the manoeuvre time. On strongly concave sites (the crescent) a pile can remove the only smooth approach to spots behind it, which costs coverage (see 9.1c); a curvature-aware isolation check would recover it.
 - **Lane mutex is conservative:** one moving truck in the lanes at a time is safe but limits throughput on very large areas; a convoy rule (same-direction following) would raise it.
 - **Text recognition:** works on clean drawings; unusual fonts may need values typed in.
 - **Baseline:** modelled as a fixed grid with 7.38 m gaps; real site layouts may differ.
-- **Next:** link to the rover prototype (the physical 2D test), add turning-circle-aware paths, loader queues, and pile settlement.
+- **Next:** link to the rover prototype (the physical 2D test), curvature-aware isolation check, loader queues, and pile settlement.
 
 ---
 

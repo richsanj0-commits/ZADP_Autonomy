@@ -341,7 +341,7 @@ drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); const file = e.dataTransfer.files[0]; if (file) openFile(file); };
 const SAMPLES = [
   { file: "site_valley_fill_50ac", name: "Valley fill 50 ac", W: 715.7, H: 336.3, bestEdge: 12 },
-  { file: "site_pit_crescent_80ac", name: "Pit crescent 80 ac", W: 1019.1, H: 574.6, bestEdge: 40 },
+  { file: "site_pit_crescent_80ac", name: "Pit crescent 80 ac", W: 1019.1, H: 574.6, bestEdge: 58 },
   { file: "site_two_lobes_120ac", name: "Two lobes 120 ac", W: 1177.9, H: 569.2, bestEdge: 31 },
   { file: "site_waste_dump_150ac", name: "Waste dump 150 ac", W: 907.6, H: 705.9, bestEdge: 9 },
   { file: "site_L_paddock_200ac", name: "L paddock 200 ac", W: 1157.3, H: 1052.1 },
@@ -1085,8 +1085,8 @@ function calc(t) {
   const m = MATERIALS[t.mat] || MATERIALS[0], tan = Math.tan(m.rep * Math.PI / 180);
   const V = t.payload > 0 ? t.payload / m.rho : null;                                    // V = P / ρ
   const r = t.rMode === "in" ? (t.rIn > 0 ? +t.rIn : null) : V ? Math.cbrt(3 * V / (Math.PI * tan)) : null;  // cone: V = ⅓πr²h, h = r·tanθ
-  const L = +t.L || 0, W = +t.W || 0;
-  return { V, r, A: r ? Math.PI * r * r : null, mat: m, tan,
+  const L = +t.L || 0, W = +t.W || 0, Rt = t.Rt > 0 ? +t.Rt : L ? 1.2 * L : null;   // turning radius: entered, or about 1.2 x length (793F-class: 14 m)
+  return { V, r, A: r ? Math.PI * r * r : null, mat: m, tan, Rt,
     mS: W ? W / 2 + 0.16 * W : null, mR: L ? 0.62 * L : null, mF: L ? 0.23 * L : null,     // side = W/2 + 0.16W, rear = 0.62L, front = 0.23L
     ok: t.payload > 0 && t.count > 0 && r > 0 && L > 0 && W > 0 };
 }
@@ -1112,10 +1112,10 @@ function render2() {
           <div>Pile area</div><div>${f(c.A, 1)} m²</div>
           <div>Truck size</div><div>${f(t.L, 1)} × ${f(t.W, 1)} m</div>
         </div>` : '<p class="hint bad">Fill in all 4 inputs</p>'}</div>`; }).join("")}</div>
-      <table class="fleet"><thead><tr><th>Truck</th><th>Payload t</th><th>Count</th><th>Share %</th><th>Pile r m</th><th>L × W m</th><th>Side m</th><th>Rear m</th><th>Front m</th></tr></thead>
+      <table class="fleet"><thead><tr><th>Truck</th><th>Payload t</th><th>Count</th><th>Share %</th><th>Pile r m</th><th>L × W m</th><th>Turn R m</th><th>Side m</th><th>Rear m</th><th>Front m</th></tr></thead>
       <tbody>${S.fleet.map((t, k) => { const c = all[k]; return `<tr class="${govI && govI.ids.includes(t.id) ? "gov" : ""}">
         <td>${t.name}</td><td>${t.payload ?? "–"}</td><td>${t.count}</td><td>${f(sh[k], 0)}</td><td>${f(c.r)}</td>
-        <td>${t.L ? f(t.L, 1) : "–"} × ${t.W ? f(t.W, 1) : "–"}</td><td>${f(c.mS)}</td><td>${f(c.mR)}</td><td>${f(c.mF)}</td></tr>`; }).join("")}</tbody></table>
+        <td>${t.L ? f(t.L, 1) : "–"} × ${t.W ? f(t.W, 1) : "–"}</td><td>${f(c.Rt, 1)}</td><td>${f(c.mS)}</td><td>${f(c.mR)}</td><td>${f(c.mF)}</td></tr>`; }).join("")}</tbody></table>
       <p class="hint">Highlighted = the truck that sets the largest margins; Round 3 shrinks the area with these. Truck and pile are drawn to the same scale on every card (bar = 5 m).</p>`;
     fv.querySelectorAll(".tcard").forEach(el => el.onclick = () => { S.sel = +el.dataset.id; render2(); });
     fv.querySelectorAll(".tcard canvas").forEach(c => drawTruckCard(c, S.fleet[+c.dataset.k], all[+c.dataset.k], maxDim));
@@ -1162,6 +1162,7 @@ function truckFormHTML(t) {
       <div class="formula">${k.V ? `V = P / ρ = ${t.payload} / ${m.rho} = ${f(k.V, 1)} m³\nCone: V = ⅓·π·r²·h,  h = r·tanθ\nr = ∛(3V / (π·tanθ)) = ${f(k.r)} m` : "Enter the payload to calculate the radius"}</div>`}
     <h3>4 · Truck size</h3>
     ${inp("L", "Length", "m")}${inp("W", "Width", "m")}
+    <div class="row"><label>Turning radius (optional)</label><input type="number" data-k="Rt" value="${t.Rt ?? ""}" step="0.1" min="0" placeholder="${k.Rt ? "auto " + f(k.Rt, 1) : "enter"}"><span class="u">m</span></div>
     ${k.mS ? `<div class="formula">Margins for Round 3:\nside  = W/2 + 0.16·W = ${f(k.mS)} m\nrear  = 0.62·L       = ${f(k.mR)} m\nfront = 0.23·L       = ${f(k.mF)} m</div>` : ""}
     <div class="row"><button class="danger" id="delTruck" style="flex:1">Remove this truck type</button></div>
   </section>`;
@@ -1543,8 +1544,9 @@ async function bestEntry(onStep) {
   const p = S.poly, keep = { entry: S.entry, sweep: S.sweep };
   const longest = p.map((a, i) => { const b = p[(i + 1) % p.length]; return { i, L: Math.hypot(b[0] - a[0], b[1] - a[1]), pt: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; })
     .sort((x, y) => y.L - x.L).slice(0, 4);
-  const edges = [{ i: keep.entry.i, pt: keep.entry.pt },   // the user's own point first, as it is (not its edge midpoint)
-    ...longest.filter(e => !(e.i === keep.entry.i && Math.hypot(e.pt[0] - keep.entry.pt[0], e.pt[1] - keep.entry.pt[1]) < 0.5))];
+  autoEntry(); const auto = S.entry; S.entry = keep.entry;                // the automatic default entry is a candidate too
+  const edges = [{ i: keep.entry.i, pt: keep.entry.pt }];   // the user's own point first, as it is (not its edge midpoint)
+  for (const e of [auto, ...longest]) if (e && !edges.some(x => x.i === e.i && Math.hypot(e.pt[0] - x.pt[0], e.pt[1] - x.pt[1]) < 0.5)) edges.push({ i: e.i, pt: e.pt });
   let best = null, k = 0;
   try { for (const e of edges) {
     k++; S.entry = { i: e.i, pt: e.pt }; S.sweep = sweepAlongEntry(); run4(); if (!S.r4) continue;
@@ -1573,7 +1575,7 @@ $("toR4").onclick = () => setRound(4);
 // ROUND 5 — Step 4 (dispatcher) + Step 5 (safety rules), live simulation
 // =====================================================================================
 const TYPE_COLORS = ["#c9a46b", "#6cb6ff", "#b083f0", "#3fb68b", "#e0823d", "#e06cb0"];
-const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, cycle: 15, headway: 12, maxIn: null, seed: 7, method: "touch", seq: "mixed" };
+const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, cycle: 15, headway: 12, maxIn: null, seed: 7, method: "touch", seq: "mixed", tTurn: 30 };
 S.simCfg = Object.assign({}, SIM_DEFAULTS);
 
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -1598,7 +1600,7 @@ PileHash.prototype.near = function (p, R) {
 // ---------------------------------------------------------------- simulation world
 function newSim(method, cfg) {
   const R = S.r4, F = R.lane.F, lane = R.lane;
-  const types = S.fleet.map((t, k) => ({ id: t.id, name: t.name, r: calc(t).r, L: +t.L, W: +t.W, share: shares()[k], gap: +(S.gap[t.id] ?? 0), color: TYPE_COLORS[k % TYPE_COLORS.length] }));
+  const types = S.fleet.map((t, k) => ({ id: t.id, name: t.name, r: calc(t).r, Rt: calc(t).Rt, L: +t.L, W: +t.W, share: shares()[k], gap: +(S.gap[t.id] ?? 0), color: TYPE_COLORS[k % TYPE_COLORS.length] }));
   const rmax = Math.max(...types.map(t => t.r)), gmax = Math.max(0, ...types.map(t => Math.abs(t.gap))), Wmax = Math.max(...types.map(t => t.W));
   const smallest = types.reduce((a, b) => a.r <= b.r ? a : b);
   const W = {
@@ -1684,7 +1686,7 @@ function buildRouteGrid(W) {
   G.road = new Uint8Array(nx * ny);
   for (const z of W.R.zones) { if (!z.branch || !z.branch.length || z.dc == null) continue;
     for (let k = 0; k < nx * ny; k++) { if (!G.base[k] || G.road[k]) continue; const c = cellXY(G, k);
-      if (Math.abs(depthOf(c, W.F) - z.dc) <= cs * 0.75 && z.branch.some(B => pointInPoly(c, B))) G.road[k] = 1; } }
+      if (Math.abs(depthOf(c, W.F) - z.dc) <= cs * 1.25 && z.branch.some(B => pointInPoly(c, B))) G.road[k] = 1; } }
   G.need = new Uint8Array(nx * ny);
   for (let k = 0; k < nx * ny; k++) { if (!G.base[k]) continue; if (G.side[k]) { G.need[k] = 1; continue; }
     const c = cellXY(G, k); if (inLane.some(L => distToEdges(c, L) < half + 0.75 * cs + 0.5)) G.need[k] = 1; }
@@ -1928,23 +1930,23 @@ function findSpot(W, ty, opts = {}) {
         if (hit) { jammed.add(o.z); continue; } }
       if (++busy > 12 && W.trucks.length) { W.capped = true; return null; }          // limit route searches while trucks are inside (retry soon); exhaustive when the area is empty
       // a route blocked only by other trucks' reserved routes is not permanent: skip the zone for now (tested once per pile count)
-      const pin0 = routeIn(W, res.stop);
-      if (!pin0) { if (o.nhIn !== W.piles.length) { o.nhIn = W.piles.length; if (!noHalo(() => routeIn(W, res.stop))) { W.stats.skipped++; o.dead = true; continue; } } jammed.add(o.z); continue; }
+      const pin0 = routeIn(W, res.stop, ty);
+      if (!pin0) { if (o.nhIn !== W.piles.length) { o.nhIn = W.piles.length; if (!noHalo(() => routeIn(W, res.stop, ty))) { W.stats.skipped++; o.dead = true; continue; } } jammed.add(o.z); continue; }
       const pin = densify(pin0, W.G.cs);
       const saved = foot.map(k => W.G.free[k]); foot.forEach(k => W.G.free[k] = 0);
-      const ro = routeOut(W, res.stop), ro2 = ro || o.nhOut === W.piles.length || noHalo(() => routeOut(W, res.stop));
+      const ro = routeOut(W, res.stop, ty), ro2 = ro || o.nhOut === W.piles.length || noHalo(() => routeOut(W, res.stop, ty));
       foot.forEach((k, i) => W.G.free[k] = saved[i]);
       if (!ro) { o.nhOut = W.piles.length; if (!ro2) { W.stats.skipped++; o.dead = true; continue; } jammed.add(o.z); continue; }
       const pout = densify(ro.path.slice(0, ro.laneIdx + 1), W.G.cs);
-      const cells = routeCells(W, [...pin, ...pout]);
+      const cells = routeCells(W, [...pin, ...pout, ...pin0.kpts, ...ro.kpts]);   // K-turn circles are reserved too
       if ([...cells].some(k => W.resv.has(k))) { jammed.add(o.z); continue; }
-      if (cutsOff(W, foot, o.c, ty)) { W.stats.isolation = (W.stats.isolation || 0) + 1; o.isoAt = W.piles.length; W.isoN = (W.isoN || 0) + 1; if (!isoFb) isoFb = { o, res, pin, cells, ro }; continue; }
-      return Object.assign(o, res, { pin, cells, ro });
+      if (cutsOff(W, foot, o.c, ty)) { W.stats.isolation = (W.stats.isolation || 0) + 1; o.isoAt = W.piles.length; W.isoN = (W.isoN || 0) + 1; if (!isoFb) isoFb = { o, res, pin, cells, ro, kturns: pin0.kturns + ro.kturns }; continue; }
+      return Object.assign(o, res, { pin, cells, ro, kturns: pin0.kturns + ro.kturns });
     }
     if (res === "unreachable") { W.stats.skipped++; o.dead = true; }
     else if (res === "overlap" || res === "lane") o.dead = true;       // piles only add and the spine only fills: permanent
   }
-  if (isoFb && !W.trucks.length) return Object.assign(isoFb.o, isoFb.res, { pin: isoFb.pin, cells: isoFb.cells, ro: isoFb.ro });   // sealing only as a last resort
+  if (isoFb && !W.trucks.length) return Object.assign(isoFb.o, isoFb.res, { pin: isoFb.pin, cells: isoFb.cells, ro: isoFb.ro, kturns: isoFb.kturns });   // sealing only as a last resort
   return null;
 }
 // touching placement: every point where a new circle (radius r) touches two piles, a pile and an edge, or two edges
@@ -1985,7 +1987,8 @@ function release(W, ty) {
   const pile = { id: W.piles.length, p: o.c, r: ty.r, ty, kind: o.kind, depth: o.depth, state: "reserved", zone: o.zone };
   W.piles.push(pile); W.hash.add(pile); W.locked.set(o.zone, true); blockAround(W, pile);
   if (pile.kind === "lane") W.minLaneDepth = Math.min(W.minLaneDepth, pile.depth);
-  const tr = { id: ++W.tid, ty, spot: pile, phase: "in", wait: 0, stop: o.stop, born: W.t };
+  const tr = { id: ++W.tid, ty, spot: pile, phase: "in", wait: 0, stop: o.stop, born: W.t, kturns: o.kturns || 0 };
+  W.stats.kturns = (W.stats.kturns || 0) + tr.kturns;
   W.version++; refreshReach(W);
   tr.path = o.pin; tr.cells = o.cells; tr.ro = o.ro; for (const k of o.cells) W.resv.set(k, tr.id);
   for (const k of o.cells.mouth || []) W.mres.set(k, (W.mres.get(k) || 0) + 1);
@@ -2028,25 +2031,134 @@ function astar(G, start, goal, ok, mv) {
   }
   return null;
 }
-function smoothPath(W, pts) {
+function smoothPath(W, pts, keepRoad = true) {
   const G = W.G; if (pts.length < 3) return pts;
   const clear = (a, b) => { const d = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(d / (G.cs * 0.5));
     for (let i = 1; i < n; i++) { const p = [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n], k = cellAt(G, p);
       if (k < 0 || !G.free[k] || G.side[k] || (W.halo && W.halo[k] > 0 && !G.need[k])) return false;
-      if (G.road[k] !== G.road[cellAt(G, a)]) return false; }                       // keep road sections on the road
+      if (keepRoad && G.road[k] !== G.road[cellAt(G, a)]) return false; }          // keep road sections on the road
     return true; };
   const out = [pts[0]]; let i = 0;
   while (i < pts.length - 1) { let j = pts.length - 1; while (j > i + 1 && !clear(pts[i], pts[j])) j--; out.push(pts[j]); i = j; }
   return out;
 }
-function routeIn(W, stop) {
+// ---------------------------------------------------------------- turning radius (problem statement: operational limits)
+// A truck drives a corner as an arc of at least its turning radius Rt if the arc fits and runs over free ground.
+// A corner that is too sharp for an arc is a three-point (K-) turn: allowed only where a free circle of half a truck length
+// is clear around the corner (that circle is reserved with the route) and it costs tTurn seconds. Otherwise the route is refused.
+function simplifyPath(pts) {
+  const P = [pts[0]]; for (const p of pts.slice(1)) { const q = P[P.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 0.05) P.push(p); }
+  if (P.length < 3) return P; const out = [P[0]];
+  for (let i = 1; i < P.length - 1; i++) { const a = out[out.length - 1], b = P[i], c = P[i + 1], L1 = Math.hypot(b[0] - a[0], b[1] - a[1]), L2 = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    const cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]), dot = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+    if (Math.abs(cr) / (L1 * L2) > 0.01 || dot < 0) out.push(b); }
+  out.push(P[P.length - 1]); return out;
+}
+const lineFree = (W, a, b, ok) => { const G = W.G, n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (G.cs * 0.5));
+  for (let i = 1; i < n; i++) { const k = cellAt(G, [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]); if (k < 0 || !ok(k)) return false; } return true; };
+const turnOk = (W, k) => W.G.base[k] && routeOk(W, k);
+// one straight line where a route leaves (in) or joins (out) its lane, instead of sideways steps across the lane strip
+function laneCut(W, pts, leaving) {
+  const G = W.G, off = p => { const k = cellAt(G, p); return k >= 0 && !G.need[k]; };
+  if (leaving) { const j = pts.findIndex((p, i) => i > 0 && off(p)); if (j > 1 && lineFree(W, pts[0], pts[j], k => turnOk(W, k))) return [pts[0], ...pts.slice(j)]; }
+  else { let j = -1; for (let i = pts.length - 2; i >= 0; i--) if (off(pts[i])) { j = i; break; }
+    if (j >= 0 && j < pts.length - 2 && lineFree(W, pts[j], pts[pts.length - 1], k => turnOk(W, k))) return [...pts.slice(0, j + 1), pts[pts.length - 1]]; }
+  return pts;
+}
+// end = "in": the last corner (into the dump spot) is the reversing manoeuvre; end = "out": the first corner (leaving it)
+function bendPath(W, pts, ty, end) {
+  const G = W.G, P = simplifyPath(pts), n = P.length, Rt = ty.Rt || 1.2 * ty.L, kr = 0.5 * ty.L;
+  if (n < 3) return { pts: P, kturns: 0, kpts: [] };
+  const len = i => Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]);
+  const phi = P.map((b, i) => { if (i === 0 || i === n - 1) return 0; const a = P[i - 1], c = P[i + 1];
+    let d = Math.abs(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0])) % (2 * Math.PI); return d > Math.PI ? 2 * Math.PI - d : d; });
+  const tl = phi.map(d => d > Math.PI - 0.05 ? Infinity : Rt * Math.tan(d / 2));          // tangent length of each arc
+  const out = [P[0]], kpts = []; let kturns = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const a = P[i - 1], b = P[i], c = P[i + 1], L1 = len(i - 1), L2 = len(i);
+    if (phi[i] < 0.02) { out.push(b); continue; }
+    if ((end === "in" && i === n - 2) || (end === "out" && i === 1)) { out.push(b); continue; }   // part of the reverse-in dump manoeuvre (tMan)
+    // each segment is shared by the arcs at both ends, in proportion to what they need
+    const room1 = i === 1 ? L1 : L1 * tl[i] / (tl[i] + tl[i - 1]), room2 = i === n - 2 ? L2 : L2 * tl[i] / (tl[i] + tl[i + 1]);
+    let arc = null;
+    if (tl[i] <= room1 + 1e-6 && tl[i] <= room2 + 1e-6) {
+      const u1 = [(b[0] - a[0]) / L1, (b[1] - a[1]) / L1], u2 = [(c[0] - b[0]) / L2, (c[1] - b[1]) / L2], t = tl[i];
+      const S0 = [b[0] - u1[0] * t, b[1] - u1[1] * t], side = u1[0] * u2[1] - u1[1] * u2[0] > 0 ? 1 : -1;
+      const C = [S0[0] - side * u1[1] * Rt, S0[1] + side * u1[0] * Rt], a0 = Math.atan2(S0[1] - C[1], S0[0] - C[0]), m = Math.max(2, Math.ceil(phi[i] * Rt / 2));
+      arc = []; for (let j = 0; j <= m; j++) { const th = a0 + side * phi[i] * j / m; arc.push([C[0] + Rt * Math.cos(th), C[1] + Rt * Math.sin(th)]); }
+      if (!arc.every(p => { const k = cellAt(G, p); return k >= 0 && turnOk(W, k); })) arc = null;   // the arc must run over free ground
+    }
+    if (arc) { out.push(...arc); continue; }
+    // too sharp for an arc here: three-point turn, only with a free circle of half a truck length around the corner
+    const ring = []; for (let rr = G.cs; rr <= kr + 1e-6; rr += G.cs) for (let j = 0; j < 12; j++) ring.push([b[0] + rr * Math.cos(j * Math.PI / 6), b[1] + rr * Math.sin(j * Math.PI / 6)]);
+    if (!ring.every(p => { const k = cellAt(G, p); return k >= 0 && turnOk(W, k); })) return null;
+    out.push(b); kturns++; kpts.push(...ring, b);
+  }
+  out.push(P[n - 1]);
+  return { pts: out, kturns, kpts };
+}
+// Dubins "CS" path: from pose (P0, heading h0) an arc of radius R turning to one side, then a straight line to point T.
+// side +1 = left (counter-clockwise), -1 = right. Returns the points and the length, or null (T inside the circle / loop).
+function csPath(P0, h0, T, R, side) {
+  const C = [P0[0] - side * Math.sin(h0) * R, P0[1] + side * Math.cos(h0) * R];
+  const dx = T[0] - C[0], dy = T[1] - C[1], d = Math.hypot(dx, dy); if (d < R + 1e-6) return null;
+  const qa = Math.atan2(dy, dx) - side * Math.acos(R / d), a0 = Math.atan2(P0[1] - C[1], P0[0] - C[0]);
+  const sweep = ((side * (qa - a0)) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI); if (sweep > Math.PI + 1e-6) return null;
+  const m = Math.max(1, Math.ceil(sweep * R / 2)), pts = [];
+  for (let j = 0; j <= m; j++) { const th = a0 + side * sweep * j / m; pts.push([C[0] + R * Math.cos(th), C[1] + R * Math.sin(th)]); }
+  pts.push(T); return { pts, len: sweep * R + Math.sqrt(d * d - R * R) };
+}
+// how far along a lane centre the truck can drive straight from the entry (stops at the first pile or gap)
+function laneReach(W, side) {
+  const G = W.G, key = side + "|" + W.piles.length; W._lr ??= {}; if (W._lr[key] != null) return W._lr[key];
+  let a = 0; for (; a < W.lane.depthMax - G.cs; a += G.cs / 2) { const p = laneAt(W, side, a + G.cs / 2);   // the exact centre-line point (grid cells may sit beside it)
+    if (!inPolys(p, W.lane.poly) || blockedByPile(W, p)) break; }
+  return (W._lr[key] = a);
+}
+// the curve must run over free ground, outside other trucks' reserved routes, and cross the other lane only briefly
+function curveFree(W, pts, side) {
+  const G = W.G, q = densify(pts, G.cs / 2); let opp = 0;
+  for (let i = 1; i < q.length - 1; i++) { const k = cellAt(G, q[i]); if (k < 0 || !G.base[k] || !G.free[k]) return false;
+    if (!G.side[k] && !G.mouth[k] && W.halo && W.halo[k] > 0) return false;
+    if (G.side[k] === -side && (opp += G.cs / 2) > 2 * W.lane.w + 2 * G.cs) return false; }
+  return true;
+}
+// IN: drive the IN lane to depth a, one arc of the turning radius off it, straight to the stop (then reverse in)
+function curveIn(W, stop, ty) {
+  const G = W.G, S0 = cellXY(G, stop), R = ty.Rt || 1.2 * ty.L, d = depthOf(S0, W.F), h0 = Math.atan2(W.F.n[1], W.F.n[0]), aMax = laneReach(W, -1);
+  let best = null;
+  { const a = Math.max(0, d); if (a <= aMax) { const P0 = laneAt(W, -1, a);              // a spot beside the lane: stop on the lane next to it and reverse straight in
+      if (Math.hypot(S0[0] - P0[0], S0[1] - P0[1]) < 2 * R && curveFree(W, [P0, S0], -1)) best = { pts: [P0, S0], len: a + Math.hypot(S0[0] - P0[0], S0[1] - P0[1]), a }; } }
+  for (let a = Math.max(0, d - 3 * R); a <= Math.min(aMax, Math.max(d + R, 2 * R)); a += G.cs) for (const sd of [1, -1]) {   // behind the entry line: leave early, curve back
+    const p = csPath(laneAt(W, -1, a), h0, S0, R, sd); if (!p || (best && p.len + a >= best.len)) continue;
+    if (curveFree(W, p.pts, -1)) best = { pts: p.pts, len: p.len + a, a };
+  }
+  return best ? [W.gate, laneAt(W, -1, 0), ...best.pts] : null;
+}
+// OUT: straight from the stop, one arc of the turning radius onto the OUT lane at depth b, the OUT lane to the exit
+function curveOut(W, from, ty) {
+  const G = W.G, S0 = cellXY(G, from), R = ty.Rt || 1.2 * ty.L, d = depthOf(S0, W.F), h1 = Math.atan2(-W.F.n[1], -W.F.n[0]), bMax = laneReach(W, 1);
+  let best = null;
+  { const b = Math.max(0, d); if (b <= bMax) { const P1 = laneAt(W, 1, b);               // a spot beside the lane: pull straight out onto the lane
+      if (Math.hypot(S0[0] - P1[0], S0[1] - P1[1]) < 2 * R && curveFree(W, [S0, P1], 1)) best = { pts: [S0, P1], len: b + Math.hypot(S0[0] - P1[0], S0[1] - P1[1]) }; } }
+  for (let b = Math.max(0, d - 3 * R); b <= Math.min(bMax, Math.max(d + R, 2 * R)); b += G.cs) for (const sd of [1, -1]) {
+    const p = csPath(laneAt(W, 1, b), h1 + Math.PI, S0, R, sd); if (!p || (best && p.len + b >= best.len)) continue;   // built backwards from the lane
+    if (curveFree(W, p.pts, 1)) best = { pts: p.pts.slice().reverse(), len: p.len + b };
+  }
+  if (!best) return null;
+  return { path: [...best.pts, laneAt(W, 1, 0), W.exit], laneIdx: best.pts.length - 1, kturns: 0, kpts: [] };
+}
+function routeIn(W, stop, ty) {
+  const cv = curveIn(W, stop, ty); if (cv) return Object.assign(cv, { kturns: 0, kpts: [] });   // smooth turning-radius path first
   const G = W.G, d = depthOf(cellXY(G, stop), W.F), gate = W.gate;
-  for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
+  const Rt = ty.Rt || 1.2 * ty.L;                                       // leaving the lane earlier makes the turn off it gentler
+  for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs, d - 0.6 * Rt, d - Rt]) {
     const k0 = nearestFree(W, laneAt(W, -1, dd), -1); if (k0 < 0) continue;
     let tail = astar(G, k0, stop, k => routeOk(W, k), G.mvIn); if (!tail) continue;
-    tail = smoothPath(W, tail);
+    tail = laneCut(W, smoothPath(W, tail, false), true);                  // fewer, gentler corners for the turning radius
     const lp = lanePath(W, -1, k0); if (!lp) continue;
-    return [gate, ...lp, ...tail.slice(1)];
+    const bent = bendPath(W, [gate, ...lp, ...tail.slice(1)], ty, "in"); if (!bent) continue;   // turning radius
+    return Object.assign(bent.pts, { kturns: bent.kturns, kpts: bent.kpts });
   }
   return null;                                                          // not reachable now
 }
@@ -2065,14 +2177,19 @@ function lanePath(W, side, k) {
   return traceWith(G, dist, () => true, k).reverse();
 }
 // OUT: stop -> to the OUT lane at the same depth -> along the OUT lane to the exit
-function routeOut(W, from) {
+function routeOut(W, from, ty) {
+  const cv = curveOut(W, from, ty); if (cv) return cv;                    // smooth turning-radius path first
   const G = W.G, d = depthOf(cellXY(G, from), W.F), exit = W.exit;
-  for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs]) {
+  const Rt = ty.Rt || 1.2 * ty.L;                                       // joining the lane nearer the exit makes the turn onto it gentler
+  for (const dd of [d, d - 2 * G.cs, d + 2 * G.cs, d - 4 * G.cs, d - 0.6 * Rt, d - Rt]) {
     const k1 = nearestFree(W, laneAt(W, 1, dd), 1); if (k1 < 0) continue;
     let head = astar(G, from, k1, k => routeOk(W, k) || k === from, G.mvOut); if (!head) continue;   // the truck's own cell is always usable
-    head = smoothPath(W, head);
+    head = laneCut(W, smoothPath(W, head, false), false);
     const lp = lanePath(W, 1, k1); if (!lp) continue;
-    return { path: [...head, ...lp.reverse().slice(1), exit], laneIdx: head.length - 1 };
+    const bent = bendPath(W, [...head, ...lp.reverse().slice(1), exit], ty, "out"); if (!bent) continue;   // turning radius
+    const p = bent.pts; let li = p.findIndex(q => { const k = cellAt(G, q); return k >= 0 && G.core[k] === 1; });   // back on the OUT lane centre
+    if (li < 1) li = p.length - 2;
+    return { path: p, laneIdx: li, kturns: bent.kturns, kpts: bent.kpts };
   }
   return null;                                                           // no way out right now: wait and retry
 }
@@ -2123,14 +2240,14 @@ function stepSim(W, dt) {
       if (tr.wait > 0) continue;
       if (tr.phase === "man") { tr.phase = "dump"; tr.wait = cfg.tDump; continue; }
       if (tr.spot.state !== "placed") { tr.spot.state = "placed"; W.version++; refreshReach(W); }
-      const ro = tr.ro || routeOut(W, tr.stop);     // the out-route checked and reserved at dispatch (no other pile can land on it)
+      const ro = tr.ro || routeOut(W, tr.stop, tr.ty);     // the out-route checked and reserved at dispatch (no other pile can land on it)
       if (!ro) { tr.wait = 10; tr.blocked = (tr.blocked || 0) + 10; continue; }   // trapped for now (counted by the deadlock check)
       tr.phase = "out"; tr.path = densify(ro.path.slice(0, ro.laneIdx + 1), W.G.cs); tr.unlockAt = tr.path.length - 1;
       tr.path.push(...densify([ro.path[ro.laneIdx], ...ro.path.slice(ro.laneIdx + 1)], W.G.cs).slice(1)); tr.wp = 0;
       continue;
     }
     if (tr.wp >= tr.path.length) {
-      if (tr.phase === "in") { tr.phase = "man"; tr.wait = cfg.tMan; continue; }
+      if (tr.phase === "in") { tr.phase = "man"; tr.wait = cfg.tMan + tr.kturns * (cfg.tTurn ?? 30); continue; }   // reversing in + any three-point turns
       tr.phase = "gone"; continue;
     }
     // car following: wait if another truck is just ahead
@@ -2293,6 +2410,7 @@ function render5() {
     ["Avg / max wait at gate", `${f(W.stats.released ? W.stats.waitSum / W.stats.released / 60 : 0, 1)} / ${f(W.stats.maxWait / 60, 1)} min`],
     ["Collisions", `<span class="${W.stats.collisions ? "bad" : "ok"}">${W.stats.collisions}</span>`],
     ["Deadlocks", `<span class="${W.stats.deadlocks ? "bad" : "ok"}">${W.stats.deadlocks}</span>`],
+    ["Three-point turns", `${W.stats.kturns || 0} <span class="hint">(${f(W.stats.released ? (W.stats.kturns || 0) / W.stats.released : 0, 2)} per load; other turns at the trucks' turning radius)</span>`],
     ["Status", W.done ? `<span class="ok">Area full after ${f(W.fillTime / 3600, 1)} h</span>` : "running"],
   ].map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
   banner(`${METHOD_NAMES[W.method]} · ${placed.length} piles · ${f(cov5.v, 1)} % covered`);
