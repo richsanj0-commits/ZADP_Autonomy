@@ -235,9 +235,9 @@
     <div id="aside5" hidden>
       <section class="card">
         <h2>Dispatch method</h2>
-        <div class="tabs" id="methodTabs" style="flex-wrap:wrap"><button data-m="base">Baseline</button><button data-m="grid">Grid + remove</button><button data-m="touch">Touching</button></div>
-        <p class="hint"><b>Baseline</b>: today's practice, fixed spot points with 7.38 m between piles. <b>Grid + remove</b>: the smallest truck's hex grid; a bigger pile cancels the grid spots it covers. <b>Touching</b>: each pile goes as deep as possible, touching piles already there.<br>
-        All three use the same checks: spot free · zone not locked (Rule 2) · truck can drive there and back (one-way lanes, Rule 1) · lane filled last, deepest first.</p>
+        <div class="tabs" id="methodTabs" style="flex-wrap:wrap"><button data-m="base">Baseline</button><button data-m="staff">Staffed 3.03 m</button><button data-m="stag">Staggered</button><button data-m="radial">Radial</button><button data-m="grid">Grid + remove</button><button data-m="touch">Touching</button></div>
+        <p class="hint"><b>Baseline</b>: today's autonomous practice, fixed spot points with 7.38 m between piles. <b>Staffed 3.03 m</b>: the same grid at the staffed spacing from the problem statement. <b>Staggered / Radial</b>: the alternative spot patterns from the problem statement (7.38 m). <b>Grid + remove</b>: the smallest truck's hex grid; a bigger pile cancels the grid spots it covers. <b>Touching</b>: each pile goes as deep as possible, touching piles already there.<br>
+        All methods use the same checks: spot free · zone not locked (Rule 2) · truck can drive there and back (one-way lanes, Rule 1) · lane filled last, deepest first.</p>
       </section>
       <section class="card">
         <h2>Run</h2>
@@ -256,8 +256,8 @@
         <table class="ztable" id="truckTable"></table>
       </section>
       <section class="card">
-        <h2>Compare all three</h2>
-        <div class="row"><button class="primary" id="cmpBtn" style="flex:1">Run all 3 on the same trucks</button></div>
+        <h2>Compare all methods</h2>
+        <div class="row"><button class="primary" id="cmpBtn" style="flex:1">Run all 6 on the same trucks</button></div>
         <div id="cmpBox"></div>
       </section>
       <section class="card">
@@ -1616,7 +1616,7 @@ function newSim(method, cfg) {
   buildRouteGrid(W);
   W.gate = laneAt(W, -1, 0).map((v, i) => v - F.n[i] * 25); W.exit = laneAt(W, 1, 0).map((v, i) => v - F.n[i] * 25);
   if (method === "grid") W.baseSpots = R.grids[smallest.id].spots.map(s => ({ c: s.p, kind: s.kind || (s.lane ? "lane" : "zone"), order: s.order }));
-  if (method === "base") W.baseSpots = fixedSpots(W);
+  if (FIXED[method]) W.baseSpots = fixedSpots(W, ...FIXED[method]);
   return W;
 }
 const laneP = (W, d) => { const F = W.F, dd = Math.max(0, Math.min(d, W.lane.depthMax)); return [F.E[0] + F.n[0] * dd, F.E[1] + F.n[1] * dd]; };
@@ -1638,12 +1638,20 @@ function zoneOf(W, c) {
   return best;
 }
 
-// baseline (current practice): fixed square grid of spot points, spacing = largest pile + 7.38 m gap
-function fixedSpots(W) {
-  const s = 2 * W.rmax + 7.38, reg = regions(W, W.rmax), out = [], b = bounds(S.poly);
-  for (let x = b[0] + s / 2; x < b[2]; x += s) for (let y = b[1] + s / 2; y < b[3]; y += s) {
-    const c = [x, y]; if (inPolys(c, reg.zoneR, 0)) out.push({ c, kind: "zone" }); else if (inPolys(c, reg.branchR, 0)) out.push({ c, kind: "branch" }); else if (inPolys(c, reg.laneR, 0)) out.push({ c, kind: "lane" });
-  }
+// pre-defined spot-point patterns from the problem statement: spacing = largest pile + gap between piles
+// (7.38 m = today's autonomous practice, 3.03 m = staffed operations)
+const FIXED = { base: ["square", 7.38], staff: ["square", 3.03], stag: ["stagger", 7.38], radial: ["radial", 7.38] };
+function fixedSpots(W, pattern = "square", gap = 7.38) {
+  const s = 2 * W.rmax + gap, reg = regions(W, W.rmax), out = [], b = bounds(S.poly);
+  const put = c => { if (inPolys(c, reg.zoneR, 0)) out.push({ c, kind: "zone" }); else if (inPolys(c, reg.branchR, 0)) out.push({ c, kind: "branch" }); else if (inPolys(c, reg.laneR, 0)) out.push({ c, kind: "lane" }); };
+  if (pattern === "radial") {                      // rings around the entry point, spots s apart along each ring
+    const E = W.F.E, R = Math.max(...S.poly.map(p => Math.hypot(p[0] - E[0], p[1] - E[1])));
+    for (let k = 1; k * s <= R + s; k++) { const rho = k * s, n = Math.max(1, Math.floor(2 * Math.PI * rho / s));
+      for (let i = 0; i < n; i++) { const a = 2 * Math.PI * (i + 0.5 * (k % 2)) / n; put([E[0] + rho * Math.cos(a), E[1] + rho * Math.sin(a)]); } }
+  } else if (pattern === "stagger") {              // staggered rows (every other row shifted half a step)
+    const dy = s * Math.sqrt(3) / 2; let row = 0;
+    for (let y = b[1] + s / 2; y < b[3]; y += dy, row++) for (let x = b[0] + s / 2 + (row % 2) * s / 2; x < b[2]; x += s) put([x, y]);
+  } else for (let x = b[0] + s / 2; x < b[2]; x += s) for (let y = b[1] + s / 2; y < b[3]; y += s) put([x, y]);
   return out;
 }
 
@@ -2229,7 +2237,7 @@ function simSummary(W) {
 
 // ---------------------------------------------------------------- Round 5 UI
 let SIM = null, simTimer = null, simSpeed = 1;
-const METHOD_NAMES = { base: "Baseline (fixed spots, 7.38 m gap)", grid: "Grid + remove", touch: "Touching placement" };
+const METHOD_NAMES = { base: "Baseline (fixed spots, 7.38 m gap)", staff: "Staffed spacing (fixed spots, 3.03 m gap)", stag: "Staggered spots (7.38 m gap)", radial: "Radial spots (7.38 m gap)", grid: "Grid + remove", touch: "Touching placement" };
 function readCfg() { ["kmh", "tMan", "tDump", "every", "cycle", "maxIn", "seed"].forEach(k => { const v = parseFloat($("c_" + k).value); S.simCfg[k] = k === "maxIn" ? (v > 0 ? v : null) : (v > 0 ? v : SIM_DEFAULTS[k]); }); }
 function resetSim() { stopSim(); readCfg(); SIM = newSim(S.simCfg.method, Object.assign({}, S.simCfg)); render5(); draw(); }
 let simRun = 0, comparing = false;   // simRun: bumped by stopSim, so a background End / compare run knows it was called off
@@ -2282,10 +2290,10 @@ function render5() {
 function compareAll() {
   if (comparing) return; comparing = true; $("cmpBtn").disabled = true;
   stopSim(); readCfg(); const id = simRun, off = () => id !== simRun;   // Reset, Play, End, a method tab or leaving Round 5 call it off
-  $("cmpBox").innerHTML = '<p class="hint">Running all three methods…</p>';
+  $("cmpBox").innerHTML = '<p class="hint">Running all six methods…</p>';
   setTimeout(async () => { try {
     const rows = [];
-    for (const m of ["base", "grid", "touch"]) {
+    for (const m of ["base", "staff", "stag", "radial", "grid", "touch"]) {
       const W = off() ? null : await runAbortable(newSim(m, Object.assign({}, S.simCfg)), w => { $("cmpBox").innerHTML = `<p class="hint">Running ${METHOD_NAMES[m].split(" (")[0]}… ${w.piles.length} piles, site clock ${f(w.t / 3600, 1)} h</p>`; }, off);
       if (off()) { $("cmpBox").innerHTML = '<p class="hint">Comparison stopped.</p>'; return; }
       rows.push({ m, s: simSummary(W), W });
@@ -2433,7 +2441,7 @@ async function runDemo() {
     S.simCfg.method = "touch"; setRound(5); simSpeed = 10;
     caption("Round 5 · Steps 4 + 5", `Trucks arrive in a random mix. The dispatcher gives each one the deepest free spot that touches existing piles, with <b>zone locking</b>, reserved routes, one-way lanes and an <b>isolation check</b>. Collisions and deadlocks are measured, not assumed.`);
     playSim(); await sleep(14000); stopSim(); render5();
-    caption("Result", `Running all three methods on the same trucks… <b>Baseline</b> = today's fixed spot points 7.38 m apart.`);
+    caption("Result", `Running every method on the same trucks… <b>Baseline</b> = today's fixed spot points 7.38 m apart, <b>Staffed</b> = 3.03 m apart.`);
     compareAll();
     for (let k = 0; k < 2400 && !/Same area|stopped|failed/.test($("cmpBox").textContent); k++) await sleep(250);
     const rows = [...$("cmpBox").querySelectorAll("tr")].slice(1).map(tr => [...tr.children].map(td => td.textContent));
