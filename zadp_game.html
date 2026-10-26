@@ -266,6 +266,7 @@
         <div class="row"><label>Manoeuvre / spot time</label><input type="number" id="c_tMan" value="60" step="5"><span class="u">s</span></div>
         <div class="row"><label>Dump time</label><input type="number" id="c_tDump" value="60" step="5"><span class="u">s</span></div>
         <div class="row"><label>Haul cycle (load + travel)</label><input type="number" id="c_cycle" value="15" step="1"><span class="u">min</span></div>
+        <div class="row"><label>Truck order at the gate</label><select id="c_seq"><option value="mixed">Random mix (fleet loop)</option><option value="bigFirst">Big trucks first</option><option value="smallFirst">Small trucks first</option><option value="alternate">Alternate sizes</option></select></div>
         <div class="row"><label>First trucks leave the pit every</label><input type="number" id="c_every" value="60" step="5"><span class="u">s</span></div>
         <p class="hint">Only the trucks entered in Round 2 operate. Each one keeps looping: haul a load, dump, drive back to the loader, come back.</p>
         <div class="row"><label>Max trucks inside (Rule 3)</label><input type="number" id="c_maxIn" placeholder="= zones" step="1"><span class="u"></span></div>
@@ -1572,7 +1573,7 @@ $("toR4").onclick = () => setRound(4);
 // ROUND 5 — Step 4 (dispatcher) + Step 5 (safety rules), live simulation
 // =====================================================================================
 const TYPE_COLORS = ["#c9a46b", "#6cb6ff", "#b083f0", "#3fb68b", "#e0823d", "#e06cb0"];
-const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, cycle: 15, headway: 12, maxIn: null, seed: 7, method: "touch" };
+const SIM_DEFAULTS = { kmh: 20, tMan: 60, tDump: 60, every: 60, cycle: 15, headway: 12, maxIn: null, seed: 7, method: "touch", seq: "mixed" };
 S.simCfg = Object.assign({}, SIM_DEFAULTS);
 
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -2075,6 +2076,12 @@ function routeOut(W, from) {
   }
   return null;                                                           // no way out right now: wait and retry
 }
+// arbitrary truck sequences (problem statement): a size may enter only when every bigger (or smaller) size is full
+function seqOk(W, ty) {
+  if (W.cfg.seq === "bigFirst") return W.types.every(t => t.r <= ty.r || W.full.has(t.id));
+  if (W.cfg.seq === "smallFirst") return W.types.every(t => t.r >= ty.r || W.full.has(t.id));
+  return true;
+}
 function stepSim(W, dt) {
   const cfg = W.cfg, v = cfg.kmh / 3.6;
   // arrivals: a fleet truck back from the pit joins the gate queue
@@ -2089,12 +2096,15 @@ function stepSim(W, dt) {
   // gate (Rule 3): enter only if fewer than maxIn inside, with a headway; every truck size in the queue is tried in turn
   if (W.queue.length && W.trucks.length < W.maxIn && !W.trucks.some(tr => tr.spot.kind === "lane") && W.t - W.lastRelease >= cfg.headway) {
     W.failAt ??= new Map(); const tried = new Set();
-    for (let i = 0; i < W.queue.length; i++) {
+    const order = W.queue.map((q, i) => i);           // truck order setting: "alternate" tries a different size than the last one first
+    if (cfg.seq === "alternate" && W.lastTy != null) order.sort((a, b) => (W.queue[a].ty.id === W.lastTy) - (W.queue[b].ty.id === W.lastTy));
+    for (const i of order) {
       const q = W.queue[i], id = q.ty.id; if (tried.has(id)) continue; tried.add(id);
+      if (!seqOk(W, q.ty)) continue;                   // "big first" / "small first": this size waits for the others
       if (W.trucks.some(o => o.phase === "in" && Math.hypot(o.pos[0] - W.gate[0], o.pos[1] - W.gate[1]) < (o.ty.L + q.ty.L) / 2 + 2)) break;   // the last truck has not left the gate
       const fa = W.failAt.get(id); if (fa && (fa.capped ? W.t - fa.t < 10 : fa.v === W.version)) continue;   // nothing changed since it failed
       W.capped = false; const tr = release(W, q.ty);
-      if (tr) { tr.unit = q.unit; if (q.unit) q.unit.state = "inside"; W.queue.splice(i, 1); W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); break; }
+      if (tr) { tr.unit = q.unit; if (q.unit) q.unit.state = "inside"; W.queue.splice(i, 1); W.lastTy = id; W.lastRelease = W.t; W.stats.released++; const w = W.t - q.at; W.stats.waitSum += w; W.stats.maxWait = Math.max(W.stats.maxWait, w); break; }
       W.failAt.set(id, { v: W.version, capped: W.capped, t: W.t });
       if (W.capped) break;                                         // search budget used: retry soon
       if (!W.trucks.length) {                                      // nothing inside and still no spot: this truck size cannot fit any more
@@ -2238,7 +2248,8 @@ function simSummary(W) {
 // ---------------------------------------------------------------- Round 5 UI
 let SIM = null, simTimer = null, simSpeed = 1;
 const METHOD_NAMES = { base: "Baseline (fixed spots, 7.38 m gap)", staff: "Staffed spacing (fixed spots, 3.03 m gap)", stag: "Staggered spots (7.38 m gap)", radial: "Radial spots (7.38 m gap)", grid: "Grid + remove", touch: "Touching placement" };
-function readCfg() { ["kmh", "tMan", "tDump", "every", "cycle", "maxIn", "seed"].forEach(k => { const v = parseFloat($("c_" + k).value); S.simCfg[k] = k === "maxIn" ? (v > 0 ? v : null) : (v > 0 ? v : SIM_DEFAULTS[k]); }); }
+function readCfg() { ["kmh", "tMan", "tDump", "every", "cycle", "maxIn", "seed"].forEach(k => { const v = parseFloat($("c_" + k).value); S.simCfg[k] = k === "maxIn" ? (v > 0 ? v : null) : (v > 0 ? v : SIM_DEFAULTS[k]); });
+  S.simCfg.seq = $("c_seq").value || "mixed"; }
 function resetSim() { stopSim(); readCfg(); SIM = newSim(S.simCfg.method, Object.assign({}, S.simCfg)); render5(); draw(); }
 let simRun = 0, comparing = false;   // simRun: bumped by stopSim, so a background End / compare run knows it was called off
 function stopSim() { simRun++; if (simTimer) cancelAnimationFrame(simTimer); simTimer = null; $("playBtn").textContent = "▶ Play"; }
