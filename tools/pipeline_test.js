@@ -79,3 +79,89 @@ window.runEdge = async (fn, edge = null, method = "touch", seed = 7) => {
   return { fn, edge: S.entry.i, sweep: S.sweep, zones: S.r4.zones.length, cov: +s.cov.toFixed(1), piles: s.piles, h: +s.hours.toFixed(0), c: s.collisions, d: s.deadlocks, forced: s.forcedDumps || 0, done: W.done, sec: Math.round((performance.now() - t0) / 1000) };
 };
 window.runList = (list) => { window.__rl = []; window.__rlBusy = true; (async () => { for (const [fn, e, m] of list) { try { window.__rl.push(await runEdge(fn, e, m)); } catch (err) { window.__rl.push({ fn, e, error: String(err && err.stack || err) }); } } window.__rlBusy = false; })(); return "started"; };
+
+// ---------------------------------------------------------------- evidence for the coverage defence
+// coverable ground C = (safe zone grown by r) ∩ dump area, as % of the area, for a pile radius r
+window.coverable = (r) => sumArea(clip(offsetPaths(S.safe.filter(p => area(p) > 0), r), [S.poly], CT().ctIntersection)) / Math.abs(area(S.poly)) * 100;
+// offline oracle: the same geometry and tangency candidates, but NO trucks, routes, locks or fill-order rules.
+// Greedy: place a pile on a free candidate until none is left (a saturated packing). order: "fill" (dispatcher's order),
+// "front" (shallow first), "random" (seeded random pick = random sequential packing on tangency points)
+window.oraclePack = (tyIdx = null, order = "fill", seed = 1) => {
+  const W = newSim("touch", Object.assign({}, S.simCfg, { seed })), rnd = rng(seed * 7 + 3);
+  const ty = tyIdx == null ? W.smallest : W.types[tyIdx];
+  const ovl = o => W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3);
+  for (let guard = 0; guard < 100000; guard++) {
+    const list = candidates(W, ty, {}); let pick = null;
+    if (order === "random") { const ok = list.filter(o => !o.dead && !(ovl(o) && (o.dead = true))); if (ok.length) pick = ok[Math.floor(rnd() * ok.length)]; }
+    else { const L = order === "front" ? [...list].sort((a, b) => Math.abs(a.depth) - Math.abs(b.depth)) : list;
+      for (const o of L) { if (o.dead) continue; if (ovl(o)) { o.dead = true; continue; } pick = o; break; } }
+    if (!pick) break;
+    const q = { id: W.piles.length, p: pick.c, r: ty.r, ty, kind: pick.kind, depth: pick.depth, state: "placed", zone: pick.z };
+    W.piles.push(q); W.hash.add(q); pick.dead = true;
+  }
+  return { cov: simCoverage(W), piles: W.piles.length, r: ty.r };
+};
+// after a live run: free spots still left for each truck size (no overlap), and how many of them a truck could reach
+window.residual = (W) => W.types.map(ty => {
+  const list = candidates(W, ty, {}); let free = 0, reach = 0;
+  for (const o of list) { if (o.dead) continue;
+    if (W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3)) continue;
+    free++; if (stopCell(W, o.c, ty.r, W.Wmax, o.kind === "zone", true) >= 0) reach++; }
+  return { type: ty.name, r: +ty.r.toFixed(2), free, reach, freeAreaPct: +(free * Math.PI * ty.r * ty.r / Math.abs(area(S.poly)) * 100).toFixed(2) }; });
+// after a live run (mutates W): how many MORE piles of the smallest size fit on top of the finished layout?
+// reachOnly = a truck must still be able to reach the spot (as in the live run); otherwise geometry only
+window.extraFill = (W, reachOnly = false) => {
+  const ty = W.smallest, ovl = o => W.hash.near(o.c, ty.r + W.rmax + W.gmax).some(q => Math.hypot(q.p[0] - o.c[0], q.p[1] - o.c[1]) < ty.r + q.r + gapOf(W, ty, q.ty) - 1e-3);
+  const before = simCoverage(W); let n = 0;
+  for (let guard = 0; guard < 20000; guard++) {
+    let pick = null;
+    for (const o of candidates(W, ty, {})) { if (o.dead) continue; if (ovl(o)) { o.dead = true; continue; }
+      if (reachOnly && (W.minLaneDepth <= o.depth + ty.r || stopCell(W, o.c, ty.r, W.Wmax, o.kind === "zone", true) < 0)) continue; pick = o; break; }
+    if (!pick) break;
+    const q = { id: W.piles.length, p: pick.c, r: ty.r, ty, kind: pick.kind, depth: pick.depth, state: "placed", zone: pick.z };
+    W.piles.push(q); W.hash.add(q); blockAround(W, q); W.version++; refreshReach(W); pick.dead = true; n++;
+  }
+  return { extraPiles: n, extraPct: +(simCoverage(W) - before).toFixed(2) };
+};
+// experiment driver: call `await expStep(25000)` repeatedly; results in window.EXP.out
+// sites: [[file, entryEdge]], seeds: live runs per site, oracle runs, bounds, saturation of the seed-7 run
+window.expPlan = (sites, seeds = [1, 2, 3, 4, 5]) => {
+  const q = [];
+  for (const [fn, e] of sites) {
+    q.push({ fn, e, kind: "bound" });
+    for (const s of seeds) q.push({ fn, e, kind: "live", seed: s });
+    q.push({ fn, e, kind: "oracle", order: "fill" }, { fn, e, kind: "oracle", order: "front" }, { fn, e, kind: "oracle", order: "random", seed: 1 }, { fn, e, kind: "oracle", order: "random", seed: 2 });
+  }
+  window.EXP = { q, out: [], cur: null, loaded: null }; return q.length + " tasks";
+};
+async function expLoad(fn, e) {
+  if (EXP.loaded === fn + "|" + e) return;
+  await pipe(fn, [], []);
+  if (e != null) { const p = S.poly, a = p[e], b = p[(e + 1) % p.length]; S.entry = { i: e, pt: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; S.sweep = sweepAlongEntry(); run4(); }
+  EXP.loaded = fn + "|" + e;
+}
+window.expStep = async (ms = 25000) => {
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) {
+    if (!EXP.cur) { EXP.cur = EXP.q.shift(); if (!EXP.cur) return "ALL DONE " + EXP.out.length; EXP.cur.W = null; }
+    const T = EXP.cur, site = T.fn.replace("site_", "");
+    await expLoad(T.fn, T.e);
+    if (T.kind === "bound") {
+      const W = newSim("touch", Object.assign({}, S.simCfg, { seed: 7 })), rmin = W.smallest.r, rmax = W.rmax;
+      EXP.out.push({ site, kind: "bound", areaHa: +(Math.abs(area(S.poly)) / 1e4).toFixed(1), safePct: +(sumArea(S.safe) / Math.abs(area(S.poly)) * 100).toFixed(1),
+        C_rmin: +coverable(rmin).toFixed(1), C_rmax: +coverable(rmax).toFixed(1), rmin: +rmin.toFixed(2), rmax: +rmax.toFixed(2),
+        r4plan: Object.values(S.r4.grids).map(g => +g.cov.toFixed(1)) });
+      EXP.cur = null; continue;
+    }
+    if (T.kind === "oracle") { const o = oraclePack(null, T.order, T.seed || 1); EXP.out.push({ site, kind: "oracle", order: T.order + (T.seed ? T.seed : ""), cov: +o.cov.toFixed(2), piles: o.piles }); EXP.cur = null; continue; }
+    // live run, sliced
+    if (!T.W) T.W = newSim("touch", Object.assign({}, S.simCfg, { seed: T.seed }));
+    const W = T.W; while (!W.done && W.t < 400 * 3600 && performance.now() - t0 < ms) stepSim(W, 1);
+    if (W.done || W.t >= 400 * 3600) {
+      const s = simSummary(W), rec = { site, kind: "live", seed: T.seed, cov: +s.cov.toFixed(2), piles: s.piles, h: +s.hours.toFixed(1), c: s.collisions, d: s.deadlocks, forced: s.forcedDumps || 0, done: W.done };
+      if (T.seed === EXP.satSeed || (EXP.satSeed == null && T.seed === 1)) { rec.residual = residual(W); rec.extraReach = extraFill(W, true); rec.extraGeom = extraFill(W, false); }
+      EXP.out.push(rec); EXP.cur = null;
+    }
+  }
+  return "running " + (EXP.cur ? EXP.cur.fn + " " + EXP.cur.kind : "") + " | done " + EXP.out.length + " | left " + EXP.q.length;
+};
