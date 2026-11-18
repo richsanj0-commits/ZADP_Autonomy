@@ -29,3 +29,7 @@ Round 1 also offers 5 sample sketches with known dimensions.
 - `tools/pipeline_test.js` — runs a sketch through all rounds in the browser console
 - `test_results.md` — results on 18 shapes
 - `zadp_sim.py`, `zadp_run.gif` — first Python prototype
+
+## 3D digital twin (supporting hardware)
+
+`twin3d/` is a MATLAB digital twin of the plan: three small ESP32 robots act as haul trucks on a 1 m x 1 m arena (1:200 of a 200 m x 200 m site), a central dispatcher fills the pile spots exported from this app, and a 3D view shows trucks tipping and piles forming. It supports the hardware demonstration; the planner above is the main solution. See [`twin3d/README.md`](twin3d/README.md) and the handover guide [`twin3d/HANDOVER.md`](twin3d/HANDOVER.md). Plans are exported with `tools/export_plan.py`.

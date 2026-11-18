@@ -222,6 +222,7 @@
         <div class="row"><button id="gap0" style="flex:1">Touching (0 m)</button><button id="gapHuman" style="flex:1">Human-like overlap (−2 m)</button></div>
         <p class="hint">Human operators place piles closer than their size, so neighbouring piles merge. Overlap packs more: in tests 0 m ≈ 77 %, −1 m ≈ 87 %, −2 m ≈ 94 % of the dump area.</p>
         <div class="row"><label><input type="checkbox" id="showNums" checked> Show fill order numbers</label></div>
+        <div class="row"><button id="exportPlan" style="flex:1">Export plan for 3D twin</button></div>
       </section>
       <section class="card">
         <h2>Lane (2 one-way lanes)</h2>
@@ -1418,6 +1419,24 @@ function run4() {
   if (S.view4 == null || !S.fleet.some(t => t.id === S.view4)) S.view4 = S.fleet[0].id;
   render4(); draw();
 }
+
+// Export for the MATLAB twin: uniform scale into an arena (5 % margin, centred), origin lower-left, y up (world y is already up: W2S flips it for the canvas)
+// With `scale` (arena m per site m) the site is NOT fitted or centred: arena = site * scale, site origin = arena origin
+function exportPlan(arenaW = 2.0, arenaH = 1.5, scale = null) {
+  if (!S.r4 || S.r4.key !== planKey()) run4();
+  const R = S.r4; if (!R) return null;
+  const b = bounds(S.poly), fixed = scale != null, k = fixed ? scale : Math.min(0.9 * arenaW / (b[2] - b[0]), 0.9 * arenaH / (b[3] - b[1]));
+  if (fixed && !S.poly.every(q => q[0] * k >= 0 && q[0] * k <= arenaW && q[1] * k >= 0 && q[1] * k <= arenaH)) { banner("Site does not fit the arena at this scale"); return null; }
+  const cx = fixed ? arenaW / (2 * k) : (b[0] + b[2]) / 2, cy = fixed ? arenaH / (2 * k) : (b[1] + b[3]) / 2, r5 = v => Math.round(v * 1e5) / 1e5;
+  const P = q => [r5((q[0] - cx) * k + arenaW / 2), r5((q[1] - cy) * k + arenaH / 2)], PP = p => p.map(P), V = v => [r5(v[0]), r5(v[1])], sc = v => v == null ? null : r5(v * k);
+  const F = R.lane.F, id = $("areaName") && $("areaName").value || S.source || "site";
+  return { version: 1, site: id, scale: r5(k), arena: { w: arenaW, h: arenaH }, boundary: PP(S.poly), safe: S.safe.filter(p => area(p) > 0).map(PP),
+    entry: { pt: P(F.E), n: V(F.n), t: V(F.t) },
+    spine: { poly: PP(R.lane.poly[0]), inLine: PP(R.lane.inLine), outLine: PP(R.lane.outLine), width: sc(2 * R.lane.w) },
+    zones: R.zones.map(z => ({ n: z.n, poly: PP(z.poly), branch: z.branch.map(PP), branchDepth: z.branch.length ? sc(z.dc) : null, depth: sc(z.depth) })),
+    trucks: S.fleet.map(t => { const c = calc(t); return { id: t.id, name: t.name, payload: +t.payload, count: +t.count, pileR: sc(c.r), L: sc(+t.L), W: sc(+t.W), turnR: sc(c.Rt) }; }),
+    spots: Object.fromEntries(S.fleet.map(t => [t.id, R.grids[t.id].spots.map(s => { const [x, y] = P(s.p); return { x, y, zone: s.zone, kind: s.kind, order: s.order }; })])) };
+}
 const latOf0 = (p, F) => (p[0] - F.E[0]) * F.t[0] + (p[1] - F.E[1]) * F.t[1];
 const centroidOf = p => { let cx = 0, cy = 0, a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length], k = x1 * y2 - x2 * y1; cx += (x1 + x2) * k; cy += (y1 + y2) * k; a += k; } return [cx / (3 * a), cy / (3 * a)]; };
 
@@ -1567,6 +1586,7 @@ $("bestEntry").onclick = async () => {
   catch (e) { console.error(e); banner("Best entry stopped by an error — see the console"); }
   finally { bestRunning = false; btn.disabled = false; $("demoBtn").disabled = false; }
 };
+$("exportPlan").onclick = () => { const o = exportPlan(); if (!o) return banner("No plan to export"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(o)], { type: "application/json" })); a.download = "plan.json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
 $("gapHuman").onclick = () => { if (bestRunning) return; S.fleet.forEach(t => S.gap[t.id] = -Math.min(2, calc(t).r)); saveSession(); run4(); };
 $("laneW").onchange = () => { const v = parseFloat($("laneW").value); S.laneW = v > 0 ? v : null; saveSession(); render2(); };
 $("toR4").onclick = () => setRound(4);
