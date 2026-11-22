@@ -3,6 +3,8 @@
 #   python tools/export_plan.py                                            valley site -> twin3d/plan/plan_valley.json
 #   python tools/export_plan.py --arena twin3d/plan/arena_site.json        1 m arena at fixed scale -> twin3d/plan/plan_arena.json
 #   (add --rows N to set "Pile rows each side of a branch" in arena mode)
+#   (add --out NAME to write twin3d/plan/NAME instead, e.g. --arena twin3d/maps/trap_site.json --out ../maps/plan_trap.json;
+#    without --out the arena plan goes to plan_arena.json, the reference plan the tests pin)
 import os, sys, json
 from playwright.sync_api import sync_playwright
 
@@ -56,6 +58,7 @@ with sync_playwright() as p:
     b.close()
 
 if plan is None: sys.exit("no plan produced (see run4 line above)")
+if arg("--out"): name = arg("--out")                 # other maps must not overwrite the reference plan
 OUT = os.path.join(PLAN, name)
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, "w") as f: json.dump(plan, f, separators=(",", ":"))

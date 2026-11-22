@@ -11,10 +11,10 @@ dt = P.sim.dt; if isfield(opts,'dt'), dt = opts.dt; end
 n = ceil(timeout/dt) + ceil(2/dt) + 2;
 L.t = zeros(n,1); L.truePose = zeros(n,3); L.odom = zeros(n,3); L.est = zeros(n,3);
 L.cmd = zeros(n,2); L.v = zeros(n,2); L.enc = zeros(n,2);
-k = 0; arrived = false; tArrive = NaN; t0 = s.t; nextCam = s.t;
+k = 0; arrived = false; tArrive = NaN; t0 = s.t; nextCam = s.t; rot = false;
 while true
     if useCam, p = s.est; else, p = s.odom; end
-    [cmd, arr] = bot_controller(p, target, P);
+    [cmd, arr, rot] = bot_controller(p, target, P, rot);
     if arr && ~arrived, arrived = true; tArrive = s.t - t0; tBrake = s.t; end
     if arrived
         cmd = [0 0];
@@ -24,7 +24,8 @@ while true
     end
     s = bot_step(s, cmd, P, dt);
     if useCam && s.t >= nextCam - 1e-12
-        s = pose_fusion(s, cam_measure(s.pose, P), P);
+        [z, tz] = cam_measure(s, P);
+        s = pose_fusion(s, z, P, tz);
         nextCam = nextCam + 1/P.cam.rateHz;
     end
     k = k + 1;

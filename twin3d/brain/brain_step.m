@@ -24,6 +24,11 @@ for i = 1:nb
                 W.bots(i).waitNeed = nd;
             end
         case 'parked'
+            % what a parked robot waits for is rebuilt every step (no stale wait-for edges)
+            W.bots(i).waitNeed = false(1, L.nSec); W.bots(i).waitBot = 0;
+            if b.slot > 1 && W.slotRes(b.slot-1) ~= 0 && W.slotRes(b.slot-1) ~= i
+                W.bots(i).waitBot = W.slotRes(b.slot-1);     % waits for the robot that holds the slot ahead
+            end
             if b.slot > 1 && W.slotRes(b.slot-1) == 0
                 % apron queue: move up one slot when the slot ahead and the way there are free
                 steps = W.adv{b.slot};
@@ -59,20 +64,42 @@ for i = 1:nb
         switch st.type
             case 'drive'
                 if ~b.brake
-                    % the phase 3 go-to-point controller, aimed at the leg's end point; in the last
-                    % 5 cm the aim point is slid sideways onto the robot's own track, so it brakes
-                    % straight along the leg instead of swinging its nose to fix a mm of offset
-                    % (and it never turns around if it passes the point)
+                    % the phase 3 go-to-point controller, steered along the planned LINE of the leg: the
+                    % aim point lies in the direction of a carrot on the leg line P.brain.lookahead ahead
+                    % of the robot's foot point, at the distance still to go (so the speed and braking
+                    % profile are those of the end point). Aiming at the end point alone corrects a
+                    % sideways offset only by about offset/distance-to-go, so slip could leave the robot
+                    % 6 mm off the planned line, more than the 4 mm site clearance its turns were checked
+                    % with. In the last P.brain.slideDist the aim point is slid sideways onto the robot's
+                    % own track, so it brakes straight along the leg instead of swinging its nose to fix
+                    % a mm of offset (and it never turns around if it passes the point).
+                    % The aim distance is the distance to go PLUS arriveTol, so the controller's "arrived"
+                    % (within arriveTol of the aim) means "reached the end point": it stops AT the end
+                    % point, not up to arriveTol short of it (a stop 5 mm short on the east column put
+                    % the whole queue row 5-7 mm off its line, toward the return-row sections)
                     dirv = [cos(st.h), sin(st.h)];
                     along = (st.p - pe(1:2))*dirv';
-                    tgt = st.p;
-                    if along < 0.05, tgt = pe(1:2) + max(along, 0)*dirv; end
-                    [cmd, arr] = bot_controller(pe, tgt, P);
-                    arr = arr || along < P.ctrl.arriveTol;
+                    aim = along + P.ctrl.arriveTol;
+                    if along < P.brain.slideDist
+                        tgt = pe(1:2) + max(aim, 0)*dirv;
+                    else
+                        foot = st.p - along*dirv;                                % robot projected on the leg line
+                        cv = foot + min(along, P.brain.lookahead)*dirv - pe(1:2);
+                        tgt = pe(1:2) + aim*cv/norm(cv);
+                    end
+                    [cmd, arr, b.rot] = bot_controller(pe, tgt, P, b.rot);
+                    % brake when the predicted coast (motor lag + accel limit at the present wheel speed,
+                    % known from the encoders) would carry the robot to the end point: stops centre on it
+                    % (first-order lag: coast v*tau while v/tau <= maxAccel; above that the accel limit
+                    % brakes first: v^2/(2a) + a*tau^2/2, continuous at v = a*tau)
+                    vs = max(mean(b.s.v), 0); tau = P.bot.motorTimeConstant; am = P.bot.maxAccel;
+                    if vs <= am*tau, coast = vs*tau; else, coast = vs^2/(2*am) + am*tau^2/2; end
+                    arr = along <= coast || (arr && along <= P.ctrl.arriveTol);
                     if st.pass
-                        % pass-through piece: done once the robot is past the piece's end point
-                        dvec = st.p - st.pEnd;
-                        done = arr || (pe(1:2) - st.pEnd)*dvec' <= 0;
+                        % pass-through piece: done once the robot is past the piece's end point, i.e.
+                        % its position projected on the leg direction lies at or beyond pEnd (dirv
+                        % points forward along the leg; sections are released only behind the robot)
+                        done = arr || (pe(1:2) - st.pEnd)*dirv' >= 0;
                     elseif arr
                         b.brake = true; cmd = [0 0];
                     end
@@ -99,7 +126,7 @@ for i = 1:nb
         % real robot reports arrived. Pass-through pieces and the dump (handled above) are not held.
         if done && W.hold(i) && ~st.pass && ~strcmp(st.type, 'dump'), done = false; end
         if done
-            b.brake = false; b.timer = 0;
+            b.brake = false; b.timer = 0; b.rot = false;
             if b.k < numel(b.steps)
                 b.k = b.k + 1;
                 keep = any(vertcat(b.steps(b.k:end).need), 1);
@@ -127,7 +154,8 @@ for i = 1:nb
         b.s.t = b.s.t + dt;
     end
     if W.useCamera && b.s.t >= b.nextCam - 1e-12
-        b.s = pose_fusion(b.s, cam_measure(b.s.pose, P), P);
+        [z, tz] = cam_measure(b.s, P);                % fix of latency ago, compensated in pose_fusion
+        b.s = pose_fusion(b.s, z, P, tz);
         b.nextCam = b.nextCam + 1/P.cam.rateHz;
     end
     % entered / exited the site (true axle point)
@@ -139,9 +167,18 @@ for i = 1:nb
 end
 W.t = W.t + dt;
 
+% ---------------------------------------------------------------- Rule 8: end of the run
+if ~W.done && W.nAssigned == 0 && all(strcmp({W.bots.mode}, 'parked')) && all(sort([W.bots.slot]) == 1:nb)
+    [W, ch] = brain_rank(W);
+    if isempty(ch)
+        W.done = true; W.endReason = 'no spot can be served any more';
+    end
+end
+
 % ---------------------------------------------------------------- Rule 7: deadlock watch
-% A wait-for graph (robot i waits for a section robot j holds) is rebuilt every step. A cycle that
-% lasts deadlockCycleTime, or nobody moving for noProgressTime while spots remain, is a deadlock.
+% A wait-for graph (robot i waits for a section robot j holds, or for the queue slot ahead that robot
+% j holds) is rebuilt every step. A cycle that lasts deadlockCycleTime, or nobody moving or dumping
+% for noProgressTime while the run is not finished (Rule 8 above), is a deadlock.
 % By design neither can happen: inside the lanes every grant is all-or-nothing (nobody waits while
 % holding a lane section); the only holders that wait are parked queue robots (QW, Q2S, Q3S) and
 % trucks at their dump stop (their zone). An exit route never needs QW or Q2S, an inbound route
@@ -160,21 +197,16 @@ for i = 1:nb
         h = unique(W.owner(nd)); h(h == 0 | h == i) = [];
         G(i, h) = true;
     end
+    if W.bots(i).waitBot > 0, G(i, W.bots(i).waitBot) = true; end
 end
-if hasCycle(G), W.cycleTime = W.cycleTime + dt; else, W.cycleTime = 0; end
-spotsLeft = ~W.done && W.nAssigned > 0;
-stuck = spotsLeft && W.t - W.lastProgress > P.brain.noProgressTime;
+if any(G(:)) && hasCycle(G), W.cycleTime = W.cycleTime + dt; else, W.cycleTime = 0; end
+stuck = ~W.done && W.t - W.lastProgress > P.brain.noProgressTime;
 if W.cycleTime > P.brain.deadlockCycleTime || stuck
-    if ~W.deadlock, W.deadlocks = W.deadlocks + 1; end
-    W.deadlock = true;
-end
-
-% ---------------------------------------------------------------- Rule 8: end of the run
-if ~W.done && W.nAssigned == 0 && all(strcmp({W.bots.mode}, 'parked')) && all(sort([W.bots.slot]) == 1:nb)
-    [W, ch] = brain_rank(W);
-    if isempty(ch)
-        W.done = true; W.endReason = 'no spot can be served any more';
+    if ~W.deadlock
+        W.deadlocks = W.deadlocks + 1;
+        if stuck, W.endReason = 'deadlock: no progress'; else, W.endReason = 'deadlock: wait cycle'; end
     end
+    W.deadlock = true;
 end
 end
 
@@ -268,12 +300,21 @@ if bad
     W.stats.exitReplans = W.stats.exitReplans + 1;
     sp = W.spots(k); isLane = strcmp(sp.kind, 'lane'); yc = NaN;
     if ~isLane, yc = W.L.zone([W.L.zone.n] == sp.zone).yc; end
-    P2 = W.P; P2.brain.clearPile = 0.5*W.P.brain.clearPile;
-    [steps, ok] = route_exit(W.L, P2, b.s.est, b.R.R0, isLane, yc, brain_obstacles(W, 0));
+    % try half the planned clearance, then a quarter, then bare non-overlap (with the PLANNED, largest
+    % pile radius, so even the last one keeps the real pile's radius margin); every one is a
+    % better route than the old one, which already came closer than half the clearance
+    ok = false;
+    for f = [0.5 0.25 0]
+        P2 = W.P; P2.brain.clearPile = f*W.P.brain.clearPile;
+        [steps, ok] = route_exit(W.L, P2, b.s.est, b.R.R0, isLane, yc, brain_obstacles(W, 0));
+        if ok, break; end
+    end
     if ok
         W.bots(i).R.out = route_needs(steps, W.L, W.P);
     else
-        W.stats.outRecheckFail = W.stats.outRecheckFail + 1;   % kept: the monitor shows what happens
+        % no exit at all: keep the old one (the pile monitor would show a hit); tests assert this stays 0
+        W.stats.outRecheckFail = W.stats.outRecheckFail + 1;
+        W.events(end+1) = ev(W.t, i, 'exitReplanFailed', k, b.truck);
     end
 end
 end
@@ -284,7 +325,7 @@ if dir == 0, dir = 1; end
 e = mod(dir*(h - th) + 0.3, 2*pi) - 0.3;           % remaining angle in the planned direction
 arrived = abs(e) < deg2rad(tolDeg);
 if arrived, cmd = [0 0]; return; end
-b = P.bot.track; wmax = P.bot.cruiseSpeed/(b/2);
+b = P.bot.trackEff; wmax = P.bot.cruiseSpeed/(b/2);
 w = dir*sign(e)*min(wmax, max(P.brain.minTurnRate, P.ctrl.kpHeading*abs(e)));
 cmd = [-w*b/2, w*b/2];
 end

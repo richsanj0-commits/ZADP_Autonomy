@@ -1,84 +1,71 @@
-# link: MATLAB <-> MQTT <-> robots (phase 7)
+# link: MATLAB <-> MQTT <-> robots + camera (phase 7)
 
-The twin leads. The brain keeps running the simulated robots (proven collision-free). Whenever a robot's current
-route step changes, the link publishes that step to the real robot as a command (`goto`, `turn`, `dump`, `stop`). The
-real robot executes it with its own encoder controller and reports telemetry; the overhead camera reports its true pose.
-The link records the position and heading difference between every real robot and its twin, and with
-`opts.syncToReal = true` it holds the twin at the end of a step until the real robot reports `arrived`.
-
-Everything up to (not including) real hardware is built and tested against `fake_bot.py`, a stand-in for the ESP32s.
-Message contract and the ESP32 firmware checklist: `TOPICS.md`.
+The twin leads. The brain keeps running the simulated robots (proven collision-free). Whenever a robot's route step
+changes, the link publishes that step to the real robot as one command (`goto`, `turn`, `dump`, `stop`). The robot
+drives it with its own controller (the same laws as the twin) and reports telemetry; the overhead ArUco camera reports
+its true pose. The link logs twin-vs-real error; with `syncToReal` the twin waits at the end of every step until the
+real robot reports `arrived`. Contract (single source for topics, fields, semantics, timing): `TOPICS.md`.
 
 ```
- MATLAB brain --TCP/JSON--> bridge.py --MQTT--> broker --MQTT--> ESP32 x3 (real)   /  fake_bot.py (test)
- (twin3d)     <-------------            <--------        <--------  aruco_node.py (camera)  /  fake_bot.py (test)
+ MATLAB brain --TCP/JSON--> bridge.py --MQTT--> broker --MQTT--> ESP32 x3 (firmware/zadp_bot)  | fake_bot.py (dry/test)
+ (twin3d)     <-- heartbeat ->  (repeats cmds 10 Hz)  <--------  aruco_node.py (webcam)         | aruco_node.py --sim
 ```
-In `--loopback` mode the bridge is its own broker and `fake_bot.py` attaches to the bridge; nothing else changes.
+Numbers: `params/twin_params.m` -> `link_write_config` -> `link_config.json`, read by bridge.py, fake_bot.py,
+aruco_node.py; `py/check_numbers.py` compares the firmware's `config.h` with it.
 
-## Run without hardware (what the tests do)
+## Real robots: one command
 ```matlab
 run('E:\catrover_dumpautonomy\twin3d\startup.m')
-demo_link                 % 120 s of sim time = 120 s of wall time, saves link\demo_link.png
-test_link                 % or run_all_tests
+R = run_real();                               % or run_real('real', struct('maxTime', 120, 'camArgs', '--camera 1'))
 ```
-Needs only Python 3 (standard library) on the PATH. `paho-mqtt` and a broker are used automatically if both are present,
-otherwise the bridge falls back to loopback (`link_launch` reports the mode).
+`run_real` writes `link_config.json`, checks Python / numpy / paho-mqtt / OpenCV (cv2.aruco) / the broker, starts
+`bridge.py` (broker mode, no fallback) and `aruco_node.py`, waits until the camera sees the 4 corner markers, waits for
+telemetry and a camera pose from robots 1-3, checks robot i stands on parking slot P_i (30 mm, 15 deg; the message
+names any robot that does not), then runs `brain_run_linked` with `syncToReal` and a live 3D view drawn at the camera
+poses. An error, Ctrl+C or closing the view sends stop to all robots (twice) and kills every helper process.
+Everything it prints is one line per check. Launch order and broker set-up: `../HANDOVER.md` section 14.
+
+`run_real('dry')` runs the same code path without hardware: loopback bridge, `fake_bot.py` robots (no camera of their
+own, `--truth`), `aruco_node.py --sim` (true poses projected through a synthetic pinhole camera into marker corner pixels
++ 0.3 px noise, then the real homography / pose code). Tested by `tests/test_run_real`.
+
+## Tests and demo (no hardware)
+```matlab
+test_link          % loopback bridge + fake robots: contract fields, watchdog, keep-alive across a stall, linked runs
+test_run_real      % run_real('dry'), plus a robot off its slot and a hidden corner (both must fail with a clear message)
+test_firmware      % config.h vs twin_params, motion_core JS mirror (node), camera geometry (numpy)
+demo_link
+```
+Tests ALWAYS use loopback (in broker mode they would publish on the real robot topics).
 
 ## Files
 | File | What |
 |---|---|
-| `py/bridge.py` | localhost TCP (newline-delimited JSON `{"topic":..,"payload":{..}}`, `{"subscribe":[..]}`) <-> MQTT broker (paho-mqtt) or in-process loopback router |
-| `py/fake_bot.py` | stand-in for 1..3 ESP32 robots with the real numbers (wheel 34 mm, track 75.3 mm, 2772.2 counts/rev, 300 rpm, motor lag, go-to-point + turn controller, 20 Hz telemetry) and the camera node (30 Hz pose, 3 mm / 1 deg noise) |
-| `py/transport.py` | the two clients both use (TCP to the bridge, paho to a broker) |
-| `py/aruco_node.py` | OpenCV camera node, **not run against a camera** (below) |
+| `TOPICS.md` | the contract |
+| `run_real.m` | one-command launcher (real / dry) |
+| `link_write_config.m` | twin_params -> `link_config.json` |
+| `py/bridge.py` | localhost TCP <-> broker (paho-mqtt) or in-process loopback router; repeats each robot's last command at `P.link.repeatHz` while MATLAB was heard within `P.link.hostTimeout` |
+| `py/fake_bot.py` | reference robot: the firmware's command semantics and controller on the twin's motor model; optional camera / truth publisher |
+| `py/aruco_node.py` | camera node: DICT_4X4_50, robots 1-3, corners 10-13, homography, parallax, axle offset, `t` + `age`; `--sim` mode |
+| `py/test_aruco_geometry.py` | camera geometry on synthetic pixels (numpy only) |
+| `py/check_numbers.py` | firmware `config.h` vs `link_config.json` |
+| `py/transport.py` | the two clients (TCP to the bridge, paho to a broker) |
+| `markers/make_markers.py` | printable markers at true size (needs OpenCV); output `robots_A4.pdf`, `corners_A4.pdf`, `placement.txt` |
 | `link_open`, `link_send_cmd`, `link_poll`, `link_close` | MATLAB side, base MATLAB only (`tcpclient`, `jsonencode`, `jsondecode`) |
-| `link_keepalive`, `link_stop_all` | repeat the last command every 100 ms (watchdog), stop everybody |
-| `link_from_brain(W, Wprev, L)` | route-step changes -> commands (drive pieces of one drive = one `goto`) |
-| `brain_run_linked(plan, P, opts)` | `brain_run` with the link attached, paced to real time; logs twin pose, real pose, error, latency; honours `opts.syncToReal` |
-| `link_launch`, `link_kill`, `link_python` | start / stop the background processes (PID checked), find Python |
-| `demo_link.m`, `../tests/test_link.m` | demo and test |
+| `link_keepalive`, `link_stop_all` | heartbeat to the bridge, stop everybody |
+| `link_from_brain(W, Wprev, L)` | route-step changes -> commands (drive pieces of one drive = one `goto`; turns carry `dir` and `tol`) |
+| `brain_run_linked(plan, P, opts)` | `brain_run` with the link, paced to real time; `syncToReal`, `onStep` (live view), `abortFcn`; ends on a robot `offline` / silent |
+| `link_launch`, `link_kill`, `link_python` | start / stop the helper processes (PID checked), find Python |
 
-Hooks added to the brain (no change when unused): `brain_run` options `beforeStep` / `afterStep`, `W.hold` in
-`brain_step` (`brain_init` sets it to false).
+## Timing in one line
+Bridge repeats at 10 Hz while MATLAB was heard within 1.0 s; robot watchdog 0.3 s. A 0.4-0.6 s brain stall never
+stops a robot; a closed MATLAB stops them in 0.3 s, a hung one in 1.3 s (`TOPICS.md` "Timing").
 
-### syncToReal and stalls
-* `syncToReal = false`: the real robots simply follow; the log shows how far they drift from the twin.
-* `syncToReal = true`: at the end of every drive/turn step and at the end of the dump the twin robot waits until the real one
-  reports `arrived` for that command's `seq`. Release after `holdTimeout` (20 s, counted in `lk.holdTimeouts`).
-* The run is paced to the wall clock. A slow brain step (the planning at the start takes about 1 s) is absorbed by moving
-  the clock, never caught up faster than real time. If the link is silent for 300 ms the real robots stop (watchdog)
-  and continue when the commands come back.
-
-## Real broker and real robots (later)
-You run these yourself; the repository never installs anything.
-```
-pip install paho-mqtt                       # MQTT client for bridge.py and aruco_node.py
-pip install opencv-python numpy             # only for the camera node
-```
-Broker: install Mosquitto (https://mosquitto.org/download/), allow LAN clients in `mosquitto.conf`
-(`listener 1883` and `allow_anonymous true` for a closed test network), start `mosquitto -v`.
-
-1. Edit `params/twin_params.m`: `P.mqtt.broker = '192.168.x.y'` (the PC running the broker; `'localhost'` if the broker is
-   on the same PC as MATLAB), `P.mqtt.port = 1883`. The ESP32 firmware needs the same address.
-2. Start the bridge (no fallback, so a missing broker is an error instead of silent loopback):
-   `python link\py\bridge.py --broker 192.168.x.y --broker-port 1883 --no-fallback --port 18830`
-3. Start the camera node (see below), mount marker ids 1, 2, 3 on the robots.
-4. Power the robots (firmware per the checklist in `TOPICS.md`; the current firmware speaks TCP port 23 and needs the MQTT client first).
-5. In MATLAB: `L = link_open(P, struct('port', 18830)); [W, log, lk] = brain_run_linked(plan, P, struct('link', L, 'maxTime', 120, 'syncToReal', true)); link_close(L);`
-   Place the robots at the parking slots `P.brain.parking` first (the twin starts there).
-   Try without `syncToReal` first, with one robot, at low speed.
-6. Test the bridge/broker side with the fake robots first: `python link\py\fake_bot.py --bots 1,2,3 --broker localhost`
-   (with `--no-cam` once the real camera node runs).
-
-## ArUco camera node: NOT TESTED
-`py/aruco_node.py` is complete but has **never been run against a camera** (no camera, OpenCV not installed here). It passes
-`python -m py_compile` and imports without OpenCV; the rest is written from the OpenCV 4.x documentation. Expect to tune it.
-
-* Dictionary `DICT_4X4_50`. Robot markers ids 1-3 flat on top, centred over the axle, the marker's up edge toward the nose.
-* Corner markers ids 10, 11, 12, 13 at the arena corners (10 = (0,0), 11 = (1,0), 12 = (1,1), 13 = (0,1); `--corner-inset`
-  if their centres are inside the arena). All four must be visible once; the homography is then kept.
-* Run: `python link\py\aruco_node.py --camera 0 --broker localhost --show` (or `--bridge 127.0.0.1:18830`). Camera straight above
-  the arena, whole arena + apron in view, fixed exposure, markers at least 25 mm printed with white border.
-* Publishes `zadp/cam/pose` `{bot, x, y, heading, t}`. The 50 ms camera latency is not compensated.
-* Not done: lens undistortion, apron region (y < 0) is outside the 4 corner markers but the homography extrapolates; add
-  markers if its accuracy is poor.
+## Camera node
+Markers: robot id = robot number, 60 mm, centred on the robot top (26 mm ahead of the axle), printed arrow (marker
+up edge) to the nose. Corner ids 10-13 at `P.cam.cornerXY`, outside the driven area, on blocks so their plane equals
+the robot marker plane (`P.cam.cornerHeight = P.cam.markerHeight`, 50 mm: measure your robot and set both); if the
+corners lie on the floor set `cornerHeight = 0` and `cameraHeight` (parallax is then corrected about the image-centre
+nadir). Optional lens calibration: `--calib file.json` (`camera_matrix`, `dist_coeffs`). Run by hand:
+`python link\py\aruco_node.py --camera 0 --broker <ip> --show`.
+Not run against a real camera here (OpenCV not installed); the geometry is tested on synthetic pixels.

@@ -8,6 +8,7 @@ Both clients have the same small API, so a program does not care what is behind 
 Topic patterns follow MQTT: '+' is one level, '#' is the rest (last level only).
 """
 import json
+import sys
 import socket
 import threading
 import time
@@ -85,10 +86,13 @@ class BridgeClient:
                         continue
                     try:
                         m = json.loads(line)
-                        if self.cb and 'topic' in m:
-                            self.cb(m['topic'], m.get('payload', {}))
                     except ValueError:
-                        pass
+                        continue
+                    if self.cb and isinstance(m, dict) and 'topic' in m:
+                        try:
+                            self.cb(m['topic'], m.get('payload', {}))
+                        except Exception as e:      # a bad message must not kill the reader thread
+                            print('transport: callback error on %s: %r' % (m.get('topic'), e), file=sys.stderr, flush=True)
         except OSError:
             pass
         self.alive = False

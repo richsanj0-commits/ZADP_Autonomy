@@ -6,7 +6,8 @@ function cmds = link_from_brain(W, Wprev, L)
 %   [] when nothing changed.
 %   Mapping of the steps built by brain/route_steps.m:
 %     drive -> goto  x, y = end point of the drive, heading = direction of travel
-%     turn  -> turn  x, y = where it turns, heading = target heading, dir = planned direction (+1 CCW, -1 CW)
+%     turn  -> turn  x, y = where it turns, heading = target heading, dir = planned direction (+1 CCW, -1 CW),
+%                    tol = the step's tolerance in deg (P.brain.turnTolDeg, or P.brain.dumpTolDeg at a dump stop)
 %     dump  -> dump  x, y, heading = the dump stop (the real robot only waits dumpTime and reports "dumping")
 %     hold  -> nothing (no motion)
 %   A long drive is cut by route_steps into pieces of <= 0.05 m that the twin passes without braking
@@ -24,12 +25,12 @@ for i = 1:numel(W.bots)
     end
     st = b.steps(k);
     c = struct('id', i, 'truck', b.truck, 'action', '', 'x', 0, 'y', 0, 'heading', 0, 'speed', W.P.bot.cruiseSpeed, ...
-        'dir', [], 'seq', 0, 'tFirst', 0, 'tSent', 0, 'tSim', W.t, 'step', k);
+        'dir', [], 'tol', [], 'seq', 0, 'tFirst', 0, 'tSent', 0, 'tSim', W.t, 'step', k);
     switch st.type
         case 'drive'
             c.action = 'goto'; c.x = st.p(1); c.y = st.p(2); c.heading = st.h;
         case 'turn'
-            c.action = 'turn'; c.x = st.p(1); c.y = st.p(2); c.heading = st.h; c.dir = st.dir;
+            c.action = 'turn'; c.x = st.p(1); c.y = st.p(2); c.heading = st.h; c.dir = st.dir; c.tol = st.tol;
         case 'dump'
             c.action = 'dump'; c.x = st.p(1); c.y = st.p(2); c.heading = st.h;
         otherwise

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>ZADP Hardware Twin Guide</title><style>
+@page { size: A4; margin: 15mm 14mm 16mm 14mm; }
+:root { --ink:#16181d; --mute:#555b66; --line:#c9ced6; --acc:#1a4f9c; --soft:#f3f5f8; }
+* { box-sizing: border-box; }
+body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; font-size: 9.6pt; line-height: 1.38; color: var(--ink); background:#fff; margin:0; }
+h1 { font-size: 21pt; margin: 0 0 2pt; letter-spacing: -0.3pt; }
+.sub { color: var(--mute); margin: 0 0 10pt; font-size: 10pt; }
+h2 { font-size: 13pt; margin: 14pt 0 5pt; padding-bottom: 2pt; border-bottom: 1.5px solid var(--acc); color: var(--acc); break-after: avoid; }
+h3 { font-size: 10.4pt; margin: 9pt 0 3pt; break-after: avoid; }
+p { margin: 3pt 0 5pt; }
+ul, ol { margin: 3pt 0 6pt; padding-left: 16pt; } li { margin: 1.5pt 0; }
+code, pre { font-family: Consolas, "Cascadia Mono", monospace; font-size: 8.3pt; }
+code { background: var(--soft); padding: 0 2pt; border-radius: 2px; }
+pre { background: var(--soft); border: 1px solid var(--line); border-radius: 3px; padding: 5pt 7pt; margin: 4pt 0 7pt; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }
+table { border-collapse: collapse; width: 100%; margin: 4pt 0 8pt; font-size: 8.7pt; } tr { break-inside: avoid; }
+th, td { border: 1px solid var(--line); padding: 2.2pt 5pt; text-align: left; vertical-align: top; }
+th { background: var(--soft); font-weight: 600; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+figure { margin: 6pt 0 8pt; break-inside: avoid; } figcaption { color: var(--mute); font-size: 8.5pt; margin-top: 2pt; }
+figure svg { width: 100%; height: auto; display: block; }
+.row { display: flex; gap: 12pt; align-items: flex-start; } .row > .l { width: 56%; } .row > .r { flex: 1; }
+.note { border-left: 3px solid var(--acc); background: var(--soft); padding: 3pt 8pt; margin: 5pt 0; }
+.pb { break-before: page; }
+.g { fill:#555; } .b { fill:#1a4f9c; } .r { fill:#b3261e; } .bb { fill:#111; font-weight:600; }
+</style></head><body>
+<h1>ZADP hardware twin: build and setup guide</h1>
+<p class="sub">Three ESP32 robots as haul trucks on a 1 m x 1 m arena (1:200). MATLAB twin leads, robots follow. Every number is quoted from <code>twin3d/params/twin_params.m</code>, <code>firmware/zadp_bot/include/config.h</code> or the docs named in the text.</p>
+
+<h2>1. What it is</h2>
+<p>The ZADP web app plans a dump site. <code>tools/export_plan.py</code> turns the plan into JSON. A MATLAB brain fills the pile spots with three simulated robots, with no collisions and no deadlock. The same route steps are sent over MQTT to three real ESP32 robots. Each robot drives its step with its own encoder controller, which mirrors the twin's controller. An overhead webcam finds ArUco markers and publishes the true pose of each robot. The twin leads and the robots follow. A robot stands for one 20.0 x 16.8 m haul truck. Piles exist only in the twin: on hardware the robot only drives to the spot and back.</p>
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" font-size="11">
+<defs><marker id="s" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#333"/></marker>
+<marker id="sb" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="#333"/></marker></defs>
+<style>.bx{fill:#fff;stroke:#222;stroke-width:1.3}.bm{fill:#eaf1fb;stroke:#1a4f9c;stroke-width:1.5}.bh{fill:#fdf1d6;stroke:#9a6b00;stroke-width:1.5}.ln{stroke:#333;stroke-width:1.4;fill:none}.t{fill:#111}.sm{font-size:9.5px;fill:#444}</style>
+<rect class="bx" x="10" y="20" width="150" height="56" rx="4"/><text class="t" x="85" y="44" text-anchor="middle" font-weight="600">ZADP planner</text><text class="sm" x="85" y="60" text-anchor="middle">zadp_game.html, rounds 1-4</text>
+<rect class="bx" x="205" y="20" width="150" height="56" rx="4"/><text class="t" x="280" y="44" text-anchor="middle" font-weight="600">plan JSON</text><text class="sm" x="280" y="60" text-anchor="middle">plan_arena.json (export_plan.py)</text>
+<rect class="bm" x="410" y="14" width="340" height="96" rx="4"/><text class="t" x="580" y="36" text-anchor="middle" font-weight="600">MATLAB twin (the PC)</text>
+<text class="sm" x="580" y="54" text-anchor="middle">brain: dispatch, lane sections, safety monitors</text>
+<text class="sm" x="580" y="68" text-anchor="middle">3 simulated robots, piles, 3D view</text>
+<text class="sm" x="580" y="82" text-anchor="middle">link_from_brain: route step change = one command</text>
+<text class="sm" x="580" y="96" text-anchor="middle">waits for "arrived" (syncToReal)</text>
+<line class="ln" x1="160" y1="48" x2="205" y2="48" marker-end="url(#s)"/>
+<line class="ln" x1="355" y1="48" x2="410" y2="48" marker-end="url(#s)"/>
+<rect class="bx" x="470" y="170" width="220" height="60" rx="4"/><text class="t" x="580" y="194" text-anchor="middle" font-weight="600">bridge.py</text><text class="sm" x="580" y="210" text-anchor="middle">TCP :18830 to MQTT; repeats cmd 10 Hz</text>
+<line class="ln" x1="580" y1="110" x2="580" y2="170" marker-start="url(#sb)" marker-end="url(#s)"/>
+<text class="sm" x="590" y="134">newline JSON, heartbeat 10 Hz</text><text class="sm" x="590" y="146">cmd out, telemetry + cam pose in</text>
+<rect class="bh" x="250" y="170" width="150" height="60" rx="4"/><text class="t" x="325" y="194" text-anchor="middle" font-weight="600">MQTT broker</text><text class="sm" x="325" y="210" text-anchor="middle">Mosquitto, port 1883</text>
+<line class="ln" x1="470" y1="200" x2="400" y2="200" marker-start="url(#sb)" marker-end="url(#s)"/>
+<rect class="bh" x="10" y="150" width="170" height="100" rx="4"/><text class="t" x="95" y="174" text-anchor="middle" font-weight="600">Robots 1, 2, 3</text>
+<text class="sm" x="95" y="190" text-anchor="middle">ESP32 + TB6612 + N20 encoders</text><text class="sm" x="95" y="204" text-anchor="middle">own wheel PI, go-to-point, fusion</text><text class="sm" x="95" y="218" text-anchor="middle">drive to the spot and back</text><text class="sm" x="95" y="232" text-anchor="middle">no pile, no bed on hardware</text>
+<line class="ln" x1="250" y1="190" x2="180" y2="190" marker-end="url(#s)"/>
+<line class="ln" x1="180" y1="212" x2="250" y2="212" marker-end="url(#s)"/>
+<text class="sm" x="215" y="183" text-anchor="middle">cmd</text><text class="sm" x="215" y="226" text-anchor="middle">telemetry</text>
+<rect class="bx" x="10" y="310" width="150" height="56" rx="4"/><text class="t" x="85" y="334" text-anchor="middle" font-weight="600">USB webcam</text><text class="sm" x="85" y="350" text-anchor="middle">overhead, 4 corner markers</text>
+<rect class="bx" x="205" y="310" width="170" height="56" rx="4"/><text class="t" x="290" y="334" text-anchor="middle" font-weight="600">aruco_node.py</text><text class="sm" x="290" y="350" text-anchor="middle">DICT_4X4_50, homography</text>
+<line class="ln" x1="160" y1="338" x2="205" y2="338" marker-end="url(#s)"/>
+<path class="ln" d="M330 310 L330 232" marker-end="url(#s)"/>
+<text class="sm" x="338" y="270">zadp/cam/pose</text><text class="sm" x="338" y="282">30 Hz, to robots</text><text class="sm" x="338" y="294">and to the twin</text>
+<rect x="430" y="290" width="320" height="76" rx="4" fill="#f4f4f4" stroke="#999"/>
+<text class="t" x="590" y="312" text-anchor="middle" font-weight="600">The twin leads, the robots follow</text>
+<text class="sm" x="590" y="328" text-anchor="middle">The brain plans and proves the run on simulated robots.</text>
+<text class="sm" x="590" y="342" text-anchor="middle">Real robots mirror each route step. The camera reports truth.</text>
+<text class="sm" x="590" y="356" text-anchor="middle">Piles exist only in the twin.</text>
+</svg><figcaption>Figure 1. System and data flow. Contract for every arrow: <code>twin3d/link/TOPICS.md</code>.</figcaption></figure>
+
+<h2>2. Components</h2>
+<table>
+<tr><th style="width:24%">Item</th><th>Spec (from the repo)</th></tr>
+<tr><td>Robot x 3</td><td>ESP32 WROOM-32 devkit; TB6612FNG driver; 2 x N20 geared motors, 300 RPM at the wheel (<code>P.bot.motorNoLoadRpm</code>), with quadrature encoders (2772.2 counts per wheel revolution at 4x, <code>P.bot.encoderCPR</code>); 2S battery; Mini 360 buck set to 5 V into VIN.</td></tr>
+<tr><td>Mechanics</td><td>Wheel diameter 34 mm. Track 75.3 mm (wheel centre to centre). Chassis 100 x 84 mm; axle 76 mm from the nose and 24 mm from the back. Maximum wheel speed 0.534 m/s, cruise 0.20 m/s, acceleration 0.5 m/s^2.</td></tr>
+<tr><td>Sensing on the robot</td><td>Encoders only. No IMU, no ToF. Absolute pose comes from the camera (3 mm, 1 deg, <code>P.cam</code>).</td></tr>
+<tr><td>Arena</td><td>Floor 1.0 x 1.0 m plus a 0.25 m apron below the gate edge (parking and return loop). The floor must extend to the four corner markers: marker centres at x -0.06..1.06, y -0.31..1.06 (a 60 mm marker adds 0.03 m each side).</td></tr>
+<tr><td>Markers</td><td>Robot ids 1-3, corner ids 10-13, dictionary <code>DICT_4X4_50</code>, 60 mm black square (6x6 modules of 10 mm including border), 10 mm white quiet zone. Printed by the user (section 5).</td></tr>
+<tr><td>Camera</td><td>USB webcam straight above the arena. The whole arena, apron and four corner markers in view, fixed focus and exposure. Default capture 1280 x 720, 30 Hz (<code>P.cam.rateHz</code>).</td></tr>
+<tr><td>PC</td><td>MATLAB R2026a (base MATLAB for the link, Simulink and Simulink 3D Animation for the model; the Unreal viewer is not used); Python 3 with <code>paho-mqtt</code>, <code>numpy</code>, <code>opencv-contrib-python</code> (and Pillow for the marker sheets); Mosquitto 2.x; PlatformIO for the firmware; WiFi network shared by the PC and the robots.</td></tr>
+</table>
+
+<h2>3. Wiring</h2>
+<figure>
+<svg viewBox="0 0 760 436" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" font-size="10.5">
+<style>.bx{fill:#fff;stroke:#222;stroke-width:1.4}.pw{stroke:#b3261e;stroke-width:1.8;fill:none}.sg{stroke:#1a4f9c;stroke-width:1.4;fill:none}.v3{stroke:#b36b00;stroke-width:1.6;fill:none}.g{stroke:#111;stroke-width:1.6;fill:none}.t{fill:#111}.sm{font-size:9.5px;fill:#444}.pn{font-size:10px;fill:#111}</style>
+<!-- battery and buck -->
+<rect class="bx" x="10" y="130" width="70" height="60" rx="4"/><text class="t" x="45" y="156" text-anchor="middle" font-weight="600">2S</text><text class="t" x="45" y="170" text-anchor="middle">battery</text>
+<text class="pn" x="84" y="147">+</text><text class="pn" x="84" y="185">-</text>
+<rect class="bx" x="110" y="50" width="90" height="62" rx="4"/><text class="t" x="155" y="72" text-anchor="middle" font-weight="600">Mini 360</text><text class="sm" x="155" y="86" text-anchor="middle">buck, set 5.0 V</text><text class="sm" x="155" y="100" text-anchor="middle">IN left, OUT right</text>
+<path class="pw" d="M80 146 L96 146 L96 18 L520 18 L520 44"/>
+<path class="pw" d="M96 80 L110 80"/>
+<circle cx="96" cy="80" r="2.5" fill="#b3261e"/><circle cx="96" cy="146" r="2.5" fill="#b3261e"/>
+<text class="sm" x="102" y="14" >battery + to TB6612 VM (not through the buck)</text>
+<path class="pw" d="M200 80 L230 80"/>
+<text class="sm" x="203" y="74">5 V</text>
+<!-- ESP32 -->
+<rect class="bx" x="230" y="40" width="130" height="350" rx="5"/>
+<text class="t" x="295" y="58" text-anchor="middle" font-weight="600">ESP32 WROOM-32</text><text class="sm" x="295" y="70" text-anchor="middle">devkit</text>
+<text class="pn" x="236" y="94">VIN</text>
+<text class="pn" x="354" y="104" text-anchor="end">27 PWMA</text><text class="pn" x="354" y="129" text-anchor="end">14 AIN1</text><text class="pn" x="354" y="154" text-anchor="end">26 AIN2</text>
+<text class="pn" x="354" y="179" text-anchor="end">32 PWMB</text><text class="pn" x="354" y="204" text-anchor="end">25 BIN1</text><text class="pn" x="354" y="229" text-anchor="end">33 BIN2</text>
+<text class="sm" x="354" y="241" text-anchor="end">(PCB: GPIO 5)</text>
+<text class="pn" x="354" y="268" text-anchor="end">3V3</text>
+<text class="pn" x="354" y="299" text-anchor="end">34 enc L A</text><text class="pn" x="354" y="319" text-anchor="end">35 enc L B</text>
+<text class="pn" x="354" y="349" text-anchor="end">36 enc R A</text><text class="pn" x="354" y="369" text-anchor="end">39 enc R B</text>
+<text class="sm" x="236" y="384">GPIO 2: LED</text>
+<!-- signals to TB6612 -->
+<g class="sg"><path d="M360 100 L470 100"/><path d="M360 125 L470 125"/><path d="M360 150 L470 150"/><path d="M360 175 L470 175"/><path d="M360 200 L470 200"/><path d="M360 225 L470 225"/></g>
+<!-- TB6612 -->
+<rect class="bx" x="470" y="44" width="120" height="230" rx="5"/><text class="t" x="530" y="68" text-anchor="middle" font-weight="600">TB6612FNG</text>
+<text class="pn" x="476" y="104">PWMA</text><text class="pn" x="476" y="129">AIN1</text><text class="pn" x="476" y="154">AIN2</text><text class="pn" x="476" y="179">PWMB</text><text class="pn" x="476" y="204">BIN1</text><text class="pn" x="476" y="229">BIN2</text>
+<text class="pn" x="476" y="254">STBY, VCC</text>
+<text class="pn" x="584" y="104" text-anchor="end">AO1</text><text class="pn" x="584" y="124" text-anchor="end">AO2</text><text class="pn" x="584" y="179" text-anchor="end">BO1</text><text class="pn" x="584" y="199" text-anchor="end">BO2</text>
+<text class="pn" x="530" y="40" fill="#b3261e">VM</text>
+<!-- 3V3 -->
+<path class="v3" d="M360 264 L440 264 L440 250 L470 250"/><circle cx="440" cy="264" r="2.5" fill="#b36b00"/>
+<text class="sm" x="366" y="280">3V3 to STBY + VCC</text>
+<!-- motors -->
+<rect class="bx" x="650" y="86" width="100" height="50" rx="4"/><text class="t" x="700" y="108" text-anchor="middle" font-weight="600">Motor L</text><text class="sm" x="700" y="122" text-anchor="middle">N20, 300 RPM</text>
+<rect class="bx" x="650" y="160" width="100" height="50" rx="4"/><text class="t" x="700" y="182" text-anchor="middle" font-weight="600">Motor R</text><text class="sm" x="700" y="196" text-anchor="middle">N20, 300 RPM</text>
+<path class="sg" d="M590 100 L650 100"/><path class="sg" d="M590 120 L650 120"/><path class="sg" d="M590 175 L650 175"/><path class="sg" d="M590 195 L650 195"/>
+<!-- encoders -->
+<rect class="bx" x="650" y="285" width="100" height="46" rx="4"/><text class="t" x="700" y="305" text-anchor="middle" font-weight="600">Encoder L</text><text class="sm" x="700" y="321" text-anchor="middle">A, B, V+ 3V3, GND</text>
+<rect class="bx" x="650" y="338" width="100" height="46" rx="4"/><text class="t" x="700" y="358" text-anchor="middle" font-weight="600">Encoder R</text><text class="sm" x="700" y="374" text-anchor="middle">A, B, V+ 3V3, GND</text>
+<g class="sg"><path d="M360 295 L650 295"/><path d="M360 315 L650 315"/><path d="M360 345 L650 345"/><path d="M360 365 L650 365"/></g>
+<text class="sm" x="505" y="290" text-anchor="middle">input-only pins, no internal pull-up</text>
+<text class="sm" x="505" y="381" text-anchor="middle">pull up to 3V3 if the outputs are open collector</text>
+
+<text class="sm" x="750" y="400" text-anchor="end">encoder V+ from the ESP32 3V3 pin, not VIN</text>
+<!-- grounds -->
+<path class="g" d="M45 190 L45 410"/><path class="g" d="M295 390 L295 410"/><path class="g" d="M530 274 L530 410"/>
+<path class="g" d="M45 410 L700 410"/><text class="sm" x="750" y="426" text-anchor="end">common GND: battery -, buck, ESP32, TB6612, encoders (one rail)</text>
+<path class="g" d="M155 112 L155 410"/>
+</svg><figcaption>Figure 2. Wiring per robot (hand-wired pins; the PCB variant moves BIN2 to GPIO 5). Pin source: <code>firmware/zadp_bot/include/config.h</code>.</figcaption></figure>
+<table>
+<tr><th>Function</th><th class="n">GPIO</th><th>Driver / encoder pin</th><th>config.h / note</th></tr>
+<tr><td>Left motor PWM</td><td class="n">27</td><td>PWMA</td><td><code>PIN_PWMA</code>; LEDC 5 kHz, 8 bit</td></tr>
+<tr><td>Left motor IN1 / IN2</td><td class="n">14 / 26</td><td>AIN1 / AIN2</td><td><code>MOTOR_L_INVERT 1</code>: forward = AIN1 low, AIN2 high</td></tr>
+<tr><td>Right motor PWM</td><td class="n">32</td><td>PWMB</td><td><code>PIN_PWMB</code></td></tr>
+<tr><td>Right motor IN1</td><td class="n">25</td><td>BIN1</td><td><code>MOTOR_R_INVERT 0</code>: forward = BIN1 high, BIN2 low</td></tr>
+<tr><td>Right motor IN2, hand-wired</td><td class="n">33</td><td>BIN2</td><td><code>PIN_BIN2</code> default; envs <code>bot1</code>..<code>bot3</code></td></tr>
+<tr><td>Right motor IN2, PCB</td><td class="n">5</td><td>BIN2</td><td><code>-DPIN_BIN2=5</code>; envs <code>bot1_pcb</code>..<code>bot3_pcb</code>. GPIO 5 is a strapping pin: the right motor may twitch at reset</td></tr>
+<tr><td>Left encoder A / B</td><td class="n">34 / 35</td><td>encoder A / B</td><td><code>ENC_L_DIR +1</code></td></tr>
+<tr><td>Right encoder A / B</td><td class="n">36 / 39</td><td>encoder A / B</td><td><code>ENC_R_DIR -1</code></td></tr>
+<tr><td>Status LED</td><td class="n">2</td><td>on-board LED</td><td><code>PIN_LED</code></td></tr>
+<tr><td>STBY</td><td class="n">-</td><td>STBY</td><td>tied high (3V3), not driven by the firmware</td></tr>
+</table>
+<ul>
+<li>Supply: battery + goes to TB6612 VM and to the buck input. Buck output (5 V) goes to the ESP32 VIN. TB6612 VCC is 3.3 V from the ESP32 3V3 pin. Encoders are powered from 3.3 V.</li>
+<li>GPIO 34, 35, 36, 39 are input-only and have no internal pull-ups. If the encoder outputs are open collector, add external pull-ups to 3.3 V.</li>
+<li>One common ground for battery, buck, ESP32, TB6612 and encoders.</li>
+<li>Direction flags in <code>config.h</code>: <code>MOTOR_L_INVERT 1</code>, <code>MOTOR_R_INVERT 0</code>, <code>ENC_L_DIR 1</code>, <code>ENC_R_DIR -1</code>. They come from the reference micromouse and must be re-checked on each robot with the bench self-test (<code>firmware/README.md</code> section 3).</li>
+<li>Battery sag resets the ESP32 (brown-out). <code>firmware/README.md</code> section 5 lists a 470-1000 uF capacitor at VM and a thick ground wire.</li>
+</ul>
+
+<h2>4. Firmware</h2>
+<p>PlatformIO project in <code>firmware/zadp_bot</code>, pinned: <code>espressif32 @ 7.0.1</code> (arduino-esp32 core 2.0.17, ESP-IDF 4.4.7, FreeRTOS), <code>knolleary/PubSubClient @ 2.8</code>, <code>bblanchon/ArduinoJson @ 7.2.1</code> (built with <code>ARDUINOJSON_USE_DOUBLE=1</code> for the camera time stamp). The first build fetches the two libraries (internet once). <code>include/motion_core.h</code> is portable C++11 (odometry, wheel PI, control laws, state machine, camera fusion); <code>src/*.cpp</code> are the FreeRTOS tasks below. <code>setup()</code> turns the motors off, starts the encoders (PCNT hardware counters; env <code>bot1_isr</code> = GPIO interrupts), creates the queues and starts five pinned tasks; <code>loop()</code> deletes itself.</p>
+<table>
+<tr><th>Task</th><th>Core</th><th>Prio</th><th>Rate</th><th>Stack (B)</th><th>Job</th></tr>
+<tr><td>control</td><td class="n">1</td><td class="n">20</td><td>200 Hz (<code>vTaskDelayUntil</code>)</td><td class="n">4096</td><td>encoders, odometry, fusion, laws, wheel PI, PWM, 300 ms command watchdog, 0.3 s link-loss stop; never blocks</td></tr>
+<tr><td>telemetry</td><td class="n">0</td><td class="n">6</td><td>20 Hz + at once on a new seq</td><td class="n">4096</td><td>telemetry JSON</td></tr>
+<tr><td>comms</td><td class="n">0</td><td class="n">5</td><td>5 ms (50 ms without WiFi)</td><td class="n">6144</td><td>WiFi + MQTT state machine with backoff, JSON parsing, heartbeat</td></tr>
+<tr><td>console</td><td class="n">1</td><td class="n">2</td><td>10 ms</td><td class="n">4096</td><td>serial bench self-test, stack report 3 s after boot (<code>w</code> any time)</td></tr>
+<tr><td>health</td><td class="n">1</td><td class="n">1</td><td>20 ms</td><td class="n">2048</td><td>status LED</td></tr>
+</table>
+<p>Data: <code>ctrlQ</code> (8, FIFO) commands to control; <code>camQ</code> and <code>snapQ</code> (length 1, overwrite) latest camera fix and state snapshot; a task notification sends the acknowledgement telemetry; an event group carries WiFi / MQTT up; a mutex guards the MQTT client. Safety: motors off at boot; MQTT down or comms stuck for 0.3 s stops the motors; any new command ends a bench raw test (capped at 10 s); the task watchdog (1 s, reset) watches only the control task.</p>
+<ol>
+<li><code>copy zadp_bot\include\secrets.example.h zadp_bot\include\secrets.h</code>. Set <code>WIFI_SSID</code>, <code>WIFI_PASS</code>, <code>MQTT_HOST</code> (the PC's LAN address, same as <code>P.mqtt.broker</code>). The file is git-ignored. Without it the build stops.</li>
+<li>Robot number = environment. <code>bot1</code>, <code>bot2</code>, <code>bot3</code> set <code>BOT_ID</code>, hence topics <code>zadp/botN/cmd</code> and <code>zadp/botN/telemetry</code>, client id <code>zadp-botN</code> and the start pose on slot PN. PCB boards: <code>bot1_pcb</code>..<code>bot3_pcb</code>.</li>
+<li>In <code>firmware/zadp_bot</code>: <code>pio run -e bot1 -t upload</code>, then <code>pio device monitor -e bot1</code> (115200 baud). Repeat for 2 and 3. Label each robot.</li>
+</ol>
+<table>
+<tr><th style="width:30%">What the firmware does</th><th>Value (<code>config.h</code>)</th></tr>
+<tr><td>Control loop</td><td><code>CONTROL_HZ</code> 200; wheel speed over 4 ticks (20 ms); wheel PI <code>WHEEL_KP</code> 600, <code>WHEEL_KI</code> 7500, integral clamp 120; PWM 5 kHz, 8 bit; acceleration limit 0.5 m/s^2 per wheel</td></tr>
+<tr><td>Telemetry</td><td><code>TELEMETRY_HZ</code> 20, plus one message at once on a new <code>seq</code></td></tr>
+<tr><td>Watchdog</td><td><code>WATCHDOG_S</code> 0.3: no cmd message for 300 ms while driving or turning stops the wheels, state <code>idle</code>, goal kept</td></tr>
+<tr><td>Go-to-point and turn</td><td>Mirror of <code>bot_controller.m</code> and <code>brain_step.m</code>: <code>KP_HEADING</code> 3.0, <code>KP_DISTANCE</code> 2.5, rotate in place above 25 deg until below 15 deg, 3 cm capture radius, arrive tolerance 5 mm, line following with a 0.15 m carrot and a 0.05 m slide, coast-predicted braking (<code>MOTOR_TAU_S</code> 0.08)</td></tr>
+<tr><td>Camera fusion</td><td>Mirror of <code>pose_fusion.m</code>: fix moved forward by the odometry since the image (lag = <code>age</code> + 0.01 s), gain 0.3, drop above 0.25 s. Firmware-only gate: first fix snaps, fixes over 50 mm or 20 deg off are rejected until 10 in a row agree</td></tr>
+<tr><td>MQTT</td><td>Keep-alive 15 s, client buffer 512 B, reconnect with backoff 2-30 s (broker) and 5-60 s (WiFi), last will <code>{"id":N,"state":"offline"}</code></td></tr>
+<tr><td>Dump</td><td>Wheels still for 4 s (<code>DUMP_TIME_S</code>); no bed on the robot</td></tr>
+</table>
+<h3>Where to change a number</h3>
+<p>Edit <code>twin3d/params/twin_params.m</code>. In MATLAB, <code>link_write_config(twin_params())</code> writes <code>twin3d/link/link_config.json</code>, which bridge.py, fake_bot.py and aruco_node.py read. Then <code>python twin3d/link/py/check_numbers.py</code> compares <code>config.h</code> with it (43 rows, all must read <code>ok</code>); MATLAB <code>test_firmware</code> runs the same check. Entries tagged CALIBRATE in <code>config.h</code> (<code>TRACK_SCALE</code>, <code>PWM_DEADBAND</code>, <code>PWM_PER_MPS</code>) are per robot. <code>TRACK_SCALE</code> must equal <code>P.bot.trackScale</code> (default 1.0; the reference micromouse needed 1.14). The per-wheel counts per revolution (2772.1 left, 2772.3 right) average to the twin's 2772.2.</p>
+
+<h2>5. Arena, camera and markers</h2>
+<div class="row">
+<div class="l"><figure><svg viewBox="0 0 560 650" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+<defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#1a4f9c"/></marker><marker id="ar2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b3261e"/></marker></defs>
+<rect x="44.0" y="34.0" width="472.0" height="572.0" fill="#faf7ee" stroke="#8a7a4a" stroke-width="1.2" stroke-dasharray="6 3"/>
+<rect x="80.0" y="70.0" width="400.0" height="400.0" fill="#fff" stroke="#555" stroke-width="1"/>
+<rect x="80.0" y="470.0" width="400.0" height="100.0" fill="#e9eef5" stroke="#555" stroke-width="1"/>
+<polygon points="100.0,450.0 460.0,450.0 460.0,170.0 380.0,90.0 100.0,90.0" fill="#f3efe4" stroke="#222" stroke-width="1.6"/>
+<polygon points="232.0,114.8 122.2,114.8 122.2,440.8 232.0,440.8" fill="#d9e6c8" stroke="#6b8a45" stroke-width="1"/>
+<polygon points="437.8,182.9 369.7,114.8 328.0,114.8 328.0,440.8 437.8,440.8" fill="#d9e6c8" stroke="#6b8a45" stroke-width="1"/>
+<text x="178.0" y="278.0" font-size="15.399999999999999" text-anchor="middle" class="g">zone 1</text>
+<text x="384.0" y="278.0" font-size="15.399999999999999" text-anchor="middle" class="g">zone 2</text>
+<rect x="232.0" y="95.0" width="96.0" height="355.0" fill="#dcdcdc" stroke="#888" stroke-width="1"/>
+<line x1="256.0" y1="470.0" x2="256.0" y2="150.0" stroke="#1a4f9c" stroke-width="2" marker-end="url(#ar)"/>
+<line x1="304.0" y1="150.0" x2="304.0" y2="492.2" stroke="#b3261e" stroke-width="2" marker-end="url(#ar2)"/>
+<text x="256.0" y="134.0" font-size="14.0" text-anchor="middle" class="b">IN</text>
+<text x="304.0" y="134.0" font-size="14.0" text-anchor="middle" class="r">OUT</text>
+<text x="280.0" y="230.0" font-size="14.0" text-anchor="middle" class="g">spine</text>
+<polyline points="304.0,492.2 440.0,492.2 440.0,533.6 268.0,533.6 262.0,533.6" fill="none" stroke="#b3261e" stroke-width="2" marker-end="url(#ar2)" stroke-dasharray="1 0"/>
+<rect x="236.0" y="516.8" width="40.0" height="33.6" fill="#f2c230" stroke="#222" stroke-width="1"/>
+<path d="M237.0,533.6 l-9,-5 l0,10 z" fill="#222"/>
+<text x="260.8" y="536.0" font-size="14.0" text-anchor="middle" class="bb">P1</text>
+<rect x="360.0" y="516.8" width="40.0" height="33.6" fill="#f2c230" stroke="#222" stroke-width="1"/>
+<path d="M361.0,533.6 l-9,-5 l0,10 z" fill="#222"/>
+<text x="384.8" y="536.0" font-size="14.0" text-anchor="middle" class="bb">P2</text>
+<rect x="420.0" y="516.8" width="40.0" height="33.6" fill="#f2c230" stroke="#222" stroke-width="1"/>
+<path d="M421.0,533.6 l-9,-5 l0,10 z" fill="#222"/>
+<text x="444.8" y="536.0" font-size="14.0" text-anchor="middle" class="bb">P3</text>
+<text x="280.0" y="560.0" font-size="14.0" text-anchor="middle" class="g">apron</text>
+<line x1="232.0" y1="450.0" x2="328.0" y2="450.0" stroke="#222" stroke-width="3"/>
+<text x="280.0" y="463.2" font-size="12.6" text-anchor="middle" class="g">gate</text>
+<rect x="44.0" y="582.0" width="24.0" height="24.0" fill="#111" stroke="#111"/>
+<rect x="48.8" y="586.8" width="14.4" height="14.4" fill="#fff" stroke="#fff"/>
+<rect x="52.4" y="590.4" width="7.2" height="7.2" fill="#111" stroke="#111"/>
+<text x="74.0" y="598.8" font-size="12.6" text-anchor="start" class="bb">id 10</text>
+<rect x="492.0" y="582.0" width="24.0" height="24.0" fill="#111" stroke="#111"/>
+<rect x="496.8" y="586.8" width="14.4" height="14.4" fill="#fff" stroke="#fff"/>
+<rect x="500.4" y="590.4" width="7.2" height="7.2" fill="#111" stroke="#111"/>
+<text x="486.0" y="598.8" font-size="12.6" text-anchor="end" class="bb">id 11</text>
+<rect x="492.0" y="34.0" width="24.0" height="24.0" fill="#111" stroke="#111"/>
+<rect x="496.8" y="38.8" width="14.4" height="14.4" fill="#fff" stroke="#fff"/>
+<rect x="500.4" y="42.4" width="7.2" height="7.2" fill="#111" stroke="#111"/>
+<text x="486.0" y="50.8" font-size="12.6" text-anchor="end" class="bb">id 12</text>
+<rect x="44.0" y="34.0" width="24.0" height="24.0" fill="#111" stroke="#111"/>
+<rect x="48.8" y="38.8" width="14.4" height="14.4" fill="#fff" stroke="#fff"/>
+<rect x="52.4" y="42.4" width="7.2" height="7.2" fill="#111" stroke="#111"/>
+<text x="74.0" y="50.8" font-size="12.6" text-anchor="start" class="bb">id 13</text>
+<circle cx="280.0" cy="320.0" r="9" fill="none" stroke="#111" stroke-width="2"/><circle cx="280.0" cy="320.0" r="3" fill="#111"/>
+<rect x="44.0" y="34.0" width="472.0" height="572.0" fill="none" stroke="#1a4f9c" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="280.0" y="338.0" font-size="12.6" text-anchor="middle" class="b">camera above</text>
+<line x1="80.0" y1="470.0" x2="136.0" y2="470.0" stroke="#111" stroke-width="1.4" marker-end="url(#ar)"/>
+<line x1="80.0" y1="470.0" x2="80.0" y2="414.0" stroke="#111" stroke-width="1.4" marker-end="url(#ar)"/>
+<text x="140.0" y="474.8" font-size="14.0" text-anchor="start" class="bb">x</text>
+<text x="72.0" y="410.0" font-size="14.0" text-anchor="end" class="bb">y</text>
+<text x="80.0" y="483.6" font-size="12.6" text-anchor="end" class="g">(0,0)</text>
+</svg><figcaption>Figure 3. Arena frame (metres), origin lower-left of the 1 m arena, x east, y north, heading counter-clockwise from +x. Dashed outer rectangle: minimum floor (reaches the corner marker edges). Red: one-way apron loop, robots in P1-P3 head west. Data: <code>twin_params.m</code>, <code>plan_arena.json</code>.</figcaption></figure></div>
+<div class="r">
+<h3>Layout</h3>
+<ul>
+<li>Site polygon (site metres 10..190): (0.05, 0.05), (0.95, 0.05), (0.95, 0.75), (0.75, 0.95), (0.05, 0.95). Gate on the bottom edge at x 0.5.</li>
+<li>Spine 0.24 m wide. IN lane x 0.44 (up), OUT lane x 0.56 (down), both 0.12 m wide.</li>
+<li>Two zones, one each side of the spine.</li>
+<li>Apron y -0.25..0. One-way loop: queue row heading west, P1 under the IN lane, IN lane, site, OUT lane, return row y -0.0555 east, east column down, P3, P2, P1.</li>
+<li>Parking <code>P.brain.parking</code>, heading west (pi), y -0.159: P1 x 0.44 (head), P2 x 0.75, P3 x 0.90 (tail). Robot N starts on slot PN. After that a returning robot always parks at P3 and moves up (rolling queue).</li>
+</ul>
+<h3>Markers (<code>P.cam</code>)</h3>
+<ul>
+<li>Corner ids 10, 11, 12, 13 at (-0.06, -0.31), (1.06, -0.31), (1.06, 1.06), (-0.06, 1.06). Orientation free; only centres are used.</li>
+<li>Robot id = robot number. Marker centred on the robot top, 0.026 m ahead of the axle (<code>markerOffset</code>), printed arrow toward the nose.</li>
+<li>Plane height: <code>markerHeight</code> = <code>cornerHeight</code> = 0.050 m. Measure the robot top and set both. Corner markers sit on blocks of that height, so the corner plane is the robot marker plane and there is no parallax. If the corners lie on the floor, set <code>cornerHeight</code> 0 and <code>cameraHeight</code> (default 1.20 m); parallax is then corrected about the image-centre nadir.</li>
+<li>Capture delay assumed 0.030 s (<code>captureDelay</code>).</li>
+</ul>
+</div></div>
+<p><b>Camera pose.</b> <code>aruco_node.py</code> fits a homography from the image to the arena plane using the four corner marker centres (kept from the last frame that showed all four, so a robot hiding a corner does not lose it). It maps each robot marker's four corners to the arena, takes the centre and the heading (bottom-edge middle to top-edge middle), and subtracts <code>markerOffset</code> along the heading to get the axle centre. It publishes <code>{bot, x, y, heading, t, age}</code> on <code>zadp/cam/pose</code>. Optional lens calibration: <code>--calib file.json</code> (<code>camera_matrix</code>, <code>dist_coeffs</code>); there is no undistortion otherwise, and the apron outside the corner markers is extrapolated.</p>
+<p><b>Marker sheets.</b> <code>twin3d/link/markers/make_markers.py</code> writes <code>robots_A4.pdf</code>, <code>corners_A4.pdf</code>, <code>marker_&lt;id&gt;.png</code> and <code>placement.txt</code> from <code>link_config.json</code> (needs <code>opencv-contrib-python</code> and Pillow). Print at 100 % and check the 50 mm bar. The repo ships the script only, no sheets.</p>
+
+<h2>6. MQTT contract summary</h2>
+<p>Broker <code>P.mqtt.broker</code>:1883, JSON UTF-8, SI units, arena frame. N = 1..3. Full text, field semantics and the 18 decisions: <code>twin3d/link/TOPICS.md</code>.</p>
+<table>
+<tr><th>Topic</th><th>Direction</th><th>Rate</th><th>QoS</th><th>Payload</th></tr>
+<tr><td><code>zadp/botN/cmd</code></td><td>brain to robot</td><td>new command, then bridge repeats at 10 Hz</td><td>1 new seq, 0 repeats</td><td><code>{id, truck, seq, action, x, y, heading, speed[, dir, tol]}</code></td></tr>
+<tr><td><code>zadp/botN/telemetry</code></td><td>robot to brain</td><td>20 Hz, plus at once on a new seq</td><td>0, not retained</td><td><code>{id, seq, encL, encR, x, y, heading, state}</code></td></tr>
+<tr><td><code>zadp/cam/pose</code></td><td>camera to all</td><td>30 Hz per visible robot</td><td>0</td><td><code>{bot, x, y, heading, t, age}</code></td></tr>
+</table>
+<ul>
+<li><code>action</code>: <code>goto</code> (follow the leg line to x, y, no final turn), <code>turn</code> (in place, <code>dir</code> +1 CCW, -1 CW, 0 shortest; <code>tol</code> in degrees, default 3, 1 at dump stops), <code>dump</code> (4 s in place), <code>stop</code>. <code>speed</code> default and cap 0.20 m/s.</li>
+<li><code>seq</code> is uint32 and opaque. Same seq = repeat (refreshes the watchdog only). Any other seq replaces the command at once.</li>
+<li>Robots subscribe to <code>cmd</code> at QoS 1 and <code>cam/pose</code> at QoS 0, clean session. Client id <code>zadp-botN</code>.</li>
+<li><code>state</code>: <code>idle</code>, <code>moving</code>, <code>turning</code>, <code>dumping</code>, <code>arrived</code> (the command with this seq is done and both wheels are below 2 mm/s), <code>offline</code> (last will only). The brain waits for <code>arrived</code> with its seq.</li>
+<li><code>cam/pose</code> gives the axle pose. <code>t</code> drops duplicates and out-of-order messages. <code>age</code> = publish time - <code>t</code> on the camera PC, so no clock sync is needed.</li>
+</ul>
+<table>
+<tr><th>Number</th><th class="n">Value</th><th>Acts on</th></tr>
+<tr><td><code>P.link.watchdog</code></td><td class="n">0.3 s</td><td>Robot stops its wheels when no cmd message (new or repeat) arrives while driving or turning</td></tr>
+<tr><td><code>P.link.repeatHz</code></td><td class="n">10 Hz</td><td>bridge.py repeats each robot's last command (same seq, QoS 0)</td></tr>
+<tr><td><code>P.link.hostTimeout</code></td><td class="n">1.0 s</td><td>Repeats continue while MATLAB was heard within this time; bridges a 0.4-0.6 s brain stall</td></tr>
+<tr><td><code>P.link.heartbeat</code></td><td class="n">0.1 s</td><td>MATLAB heartbeat line to the bridge</td></tr>
+<tr><td><code>P.link.telemetryHz</code></td><td class="n">20 Hz</td><td>Robot telemetry</td></tr>
+<tr><td><code>P.link.netDelay</code></td><td class="n">0.01 s</td><td>Added to the camera <code>age</code></td></tr>
+<tr><td>MQTT keep-alive</td><td class="n">15 s</td><td>Robot client; last will on loss</td></tr>
+<tr><td><code>P.cam.maxAge</code></td><td class="n">0.25 s</td><td>Fix older than this is dropped</td></tr>
+</table>
+<p>Stop latency: MATLAB closed or crashed, robots idle after 0.3 s. MATLAB hung, 1.3 s (1.0 + 0.3). Bridge or broker gone, 0.3 s. The brain ends the run if a robot reports <code>offline</code> or its telemetry stops for 2 s.</p>
+
+<h2>7. Launch order</h2>
+<p>Everything runs on the PC that runs MATLAB unless stated. Source: <code>twin3d/HANDOVER.md</code> section 14.</p>
+<ol>
+<li><b>Broker.</b> Install Mosquitto 2.x. Create <code>C:\mosquitto\zadp.conf</code>:
+<pre>listener 1883 0.0.0.0
+allow_anonymous true</pre>
+Closed test network only. Allow inbound TCP 1883 in the Windows firewall. Stop the installed service (<code>net stop mosquitto</code>, admin shell), then:
+<pre>"C:\Program Files\mosquitto\mosquitto.exe" -v -c C:\mosquitto\zadp.conf</pre>
+Set <code>P.mqtt.broker</code> in <code>twin_params.m</code> to the PC's LAN address (<code>'localhost'</code> if MATLAB and the broker share the PC).</li>
+<li><b>Python.</b> <pre>pip install paho-mqtt numpy opencv-contrib-python pillow</pre></li>
+<li><b>Flash</b> each robot (section 4), then run the bench self-test and a single-robot MQTT test from <code>firmware/README.md</code> sections 3-4. Watch with <code>mosquitto_sub -h &lt;ip&gt; -t "zadp/#" -v</code>.</li>
+<li><b>Markers.</b> In MATLAB <code>link_write_config(twin_params())</code>, then
+<pre>python twin3d\link\markers\make_markers.py</pre>
+Print <code>robots_A4.pdf</code> and <code>corners_A4.pdf</code> at 100 %. Fit robot marker N on robot N (arrow to the nose). Place corners 10-13 per <code>placement.txt</code>, on blocks so their plane equals the robot marker plane. Set <code>P.cam.markerHeight</code> = <code>P.cam.cornerHeight</code> to the measured height.</li>
+<li><b>Camera check</b>, alone:
+<pre>python twin3d\link\py\aruco_node.py --camera 0 --broker &lt;ip&gt; --show</pre>
+It prints <code>homography ready (4 corner markers)</code>, then poses. Extra arguments for <code>run_real</code> go in <code>camArgs</code>, for example <code>--camera 1 --width 1920 --height 1080</code>.</li>
+<li><b>Place the robots</b> on P1, P2, P3 (x 0.44 / 0.75 / 0.90, y -0.159, heading west) and power them. <code>run_real</code> requires each robot within 30 mm and 15 deg of its slot.</li>
+<li><b>No-hardware test first.</b> Same code path with the loopback bridge, <code>fake_bot.py</code> robots and a simulated camera:
+<pre>run('E:\catrover_dumpautonomy\twin3d\startup.m')
+R = run_real('dry');</pre></li>
+<li><b>Real run.</b>
+<pre>run('E:\catrover_dumpautonomy\twin3d\startup.m')
+R = run_real('real', struct('maxTime', 60));   % first run
+R = run_real();                                % default maxTime 600</pre>
+<code>run_real</code> writes <code>link_config.json</code>, checks Python, numpy, paho-mqtt, OpenCV and the broker, starts <code>bridge.py</code> (broker mode, no fallback) and <code>aruco_node.py</code>, waits up to 20 s for the four corners and 15 s for telemetry and a pose from robots 1-3, checks the slots, then runs <code>brain_run_linked</code> with <code>syncToReal</code> and a live 3D view drawn at the camera poses. An error, Ctrl+C or closing the view sends stop to all robots (twice) and kills the helper processes. Raise <code>maxTime</code> step by step. A full fill takes about 2880 s of sim time, the same in wall time. <code>R.lk</code> holds twin-vs-real error, latency and hold times per robot.</li>
+</ol>
+
+<h2>8. How the simulation was planned around the hardware</h2>
+<h3>Scale and numbers</h3>
+<p>The robot sets the scale. 0.100 x 0.084 m is one 20.0 x 16.8 m truck, so 1 arena m = 200 site m (<code>P.scale.sitePerArena</code>). The arena is 200 x 200 m, about 10 acres. Physics uses the real robot numbers in <code>P.bot</code> (wheel, track, counts, motor lag 0.08 s, 1 % per-wheel slip). <code>P.truck</code> (65 mm high, bed tilt 50 deg, 4 s dump) is visual only: a generic haul truck drawn over the robot, no brand marks.</p>
+<table>
+<tr><th>Quantity</th><th>Arena</th><th>Site</th></tr>
+<tr><td>Truck footprint</td><td>0.100 x 0.084 m</td><td>20.0 x 16.8 m</td></tr>
+<tr><td>Spine, two lanes</td><td>0.240 m</td><td>48 m</td></tr>
+<tr><td>Turning radius</td><td>0.120 m</td><td>24 m</td></tr>
+<tr><td>Pile radius (500 t)</td><td>0.0353 m</td><td>7.06 m</td></tr>
+<tr><td>Cruise speed</td><td>0.20 m/s</td><td>40 m/s; site time = sim time x 4.8 (vs a 30 km/h hauler)</td></tr>
+<tr><td>One encoder count</td><td>0.0385 mm</td><td>0.0077 m</td></tr>
+</table>
+<h3>Parking and trucks</h3>
+<p>Three robots stand for an endless stream of trucks. Every entry from parking is a new truck (<code>W.truckNo</code> counts them). The rolling queue P3 to P2 to P1 is the parking. A fixed bay per robot would need a wider apron and breaks the all-or-nothing section grants. Each truck carries the plan payload times a load factor drawn uniformly from 0.85..1.00.</p>
+<h3>Lane sections and safety</h3>
+<ul>
+<li>The drivable area is cut into sections (zones Z1, Z2, IN_LOW, OUT_LOW, J, UP, apron sections). A robot starts a move only while it holds every section its swept body (plus 8 mm) touches. Long drives are cut into 5 cm pieces and a section is released only after the last piece that needs it.</li>
+<li>The whole inbound route and the zone lock are granted at once before a truck leaves the queue head. The whole exit route is granted before it leaves the dump stop. Waiting happens only in apron slots or at the dump stop.</li>
+<li>Deadlock watch: a wait cycle of 10 s, or nobody moving or dumping for 60 s before the run has ended, ends the run and is reported.</li>
+<li>Monitors, all zero in every verified run: robot-robot overlaps, robot-pile hits, off-site, section ownership, deadlocks.</li>
+<li>Fill order: lowest plan order reachable in a zone; branch spots after their zone; lane spots last, one truck at a time, deepest first.</li>
+</ul>
+<h3>Pile maths</h3>
+<p>Same as <code>calc(t)</code> in the planner: V = payload / rho, r = cbrt(3V / (pi tan(repose))), h = r tan(repose), with rho 1.8 t/m^3 and repose 37 deg. Computed at site scale, drawn at 1:200. 500 t gives V 277.8 m^3, site r 7.06 m, h 5.32 m; arena r 35.3 mm, h 26.6 mm. The real radius is capped at the planned one, so planned clearances hold. During a dump the pile grows with frac^(1/3).</p>
+<h3>Results (full fill, seed 1, all violation counts 0; <code>twin3d/plan/maps_results.md</code>)</h3>
+<table>
+<tr><th>Map</th><th class="n">Site area m^2</th><th class="n">Spots</th><th class="n">Piles placed</th><th class="n">Coverage %</th><th class="n">Tonnes</th><th class="n">Sim time s</th><th class="n">Min robot gap mm</th></tr>
+<tr><td>arena</td><td class="n">31600</td><td class="n">125</td><td class="n">125</td><td class="n">58.9</td><td class="n">58087</td><td class="n">2873</td><td class="n">12.1</td></tr>
+<tr><td>rect</td><td class="n">23400</td><td class="n">86</td><td class="n">86</td><td class="n">54.5</td><td class="n">39840</td><td class="n">1898</td><td class="n">12.0</td></tr>
+<tr><td>lshape</td><td class="n">22500</td><td class="n">82</td><td class="n">82</td><td class="n">54.0</td><td class="n">37863</td><td class="n">1792</td><td class="n">13.9</td></tr>
+<tr><td>hex</td><td class="n">25850</td><td class="n">98</td><td class="n">97</td><td class="n">55.8</td><td class="n">45037</td><td class="n">2235</td><td class="n">12.1</td></tr>
+</table>
+<p>Hex leaves one spot unfilled (lane spot order 36: no approach clears the piles over 19 directions x 8 stop distances; the straight stop sits 18.4 mm inside a pile). It is reported, not hidden. Reference plan, seeds 1 / 2 / 3: 125 / 125 / 125 piles, sim time 2873 / 2881 / 2888 s, worst pile-to-spot error 6.3 / 5.4 / 6.4 mm. Other maps in <code>twin3d/maps</code>, run before the non-convex change: trapezoid 109 / 109, chamfered 121 / 121, mirrored pentagon 126 / 126, octagon 115 / 115.</p>
+<h3>What a run shows on screen</h3>
+<p>A 3D view in base MATLAB graphics (about 8 frames/s at 1280 x 720, software rendering): dirt ground, apron slab with parking slots P1-P3, the site on a raised pad with a berm open at the gate, zones, the spine with IN (blue) and OUT (red) centre lines, three yellow haul trucks whose bed tips to 50 deg while dumping, and cone piles that grow during each dump. Views: top, orbit, gate, follow robot N. The HUD shows sim time, site time, trucks sent, piles placed out of spots, coverage percent and collisions. In <code>run_real</code> the trucks are drawn at the camera poses, so the view shows the real robots.</p>
+
+<h2>9. Status</h2>
+<h3>Tested in simulation and loopback</h3>
+<ul>
+<li>Brain and twin: full fills 125 / 125 / 125 of 125 piles for seeds 1-3; all monitors 0; four more maps in <code>maps_results.md</code> and four in <code>twin3d/maps</code>; <code>run_all_tests</code> passed on the last full run.</li>
+<li>Link, loopback with <code>fake_bot.py</code>: 120 s demo, 115 of 115 commands acknowledged, twin-vs-real position error mean 5.2 mm and worst 24.8 mm, command round trip mean 12.9 ms, twin violations 0.</li>
+<li><code>run_real('dry')</code> (loopback bridge, fake robots, simulated camera through the real geometry code), covered by <code>test_run_real</code>.</li>
+<li>Firmware logic through a line-by-line JavaScript mirror of <code>motion_core.h</code>: 47 passed, 0 failed (goto 40 of 40 arrived, turns within tolerance, watchdog, fusion, odometry in float32). <code>config.h</code> against <code>twin_params.m</code> by <code>check_numbers.py</code> (43 ok). All 9 <code>src/*.cpp</code> syntax-checked with the xtensa g++ 8.4 against arduino-esp32 2.0.17 headers (104 variant compiles, 0 errors, 0 warnings), with stand-ins for the two libraries.</li>
+<li>Camera geometry on synthetic pixels (<code>test_aruco_geometry.py</code>).</li>
+</ul>
+<h3>First verified on your bench</h3>
+<ul>
+<li>Nothing has run on an ESP32: motor and encoder directions, counts per revolution, dead band, PI gains, the PCNT encoder counters (20-turn wrap check), 200 Hz timing under WiFi load, task stack margins (<code>w</code>), the task-watchdog reset path, brown-out behaviour. The PlatformIO build with the two libraries has not been done. The arduino-esp32 core 3.x LEDC branch was not compiled. The C++ host test was not run (no host compiler); the JS mirror ran.</li>
+<li>No real broker has been connected: the MQTT path of the firmware, <code>bridge.py</code> broker mode and <code>aruco_node.py</code> is untested against Mosquitto.</li>
+<li><code>aruco_node.py</code> has never run on a camera. No OpenCV on the development PC, so the marker sheets have not been generated. Run <code>python twin3d\link\markers\make_markers.py</code> yourself (section 7, step 4). Expect to tune the camera node (no undistortion, extrapolated apron).</li>
+<li>Calibration: <code>TRACK_SCALE</code> (copy to <code>P.bot.trackScale</code>), <code>PWM_DEADBAND</code>, <code>PWM_PER_MPS</code>, per-wheel CPR; measured robot top height for <code>P.cam.markerHeight</code> and <code>cornerHeight</code>.</li>
+<li>Known limits that stay: the apron is cramped (margins of 4 to 10 mm over the tracking error, so stops must be centred on their end point and drives must follow the leg line); lane spots are filled last and one truck at a time.</li>
+</ul>
+</body></html>

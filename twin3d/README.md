@@ -8,7 +8,8 @@ absolute pose. Needs only MATLAB R2026a, Simulink, Simulink 3D Animation, Statef
 
 ## Folder map
 - `params/`  `twin_params.m` (all numbers), `pile_geometry.m` (cone from volume)
-- `plan/`    route and task planning (phase 2)
+- `plan/`    the reference dump plan `plan_arena.json` and its loader (phase 2)
+- `maps/`    four more map shapes (trapezoid, chamfered rectangle, mirrored pentagon, octagon) for `test_maps` (see `maps/README.md`)
 - `brain/`   central dispatcher (phase 4): 3 robots fill the plan, zero collisions, no deadlock (see `brain/README.md`)
 - `bot/`     single-robot physics, encoders, go-to-point controller (phase 3)
 - `world3d/` 3D scene, haul trucks, piles, replay and live view (phase 6, see `world3d/README.md`)
@@ -19,7 +20,7 @@ absolute pose. Needs only MATLAB R2026a, Simulink, Simulink 3D Animation, Statef
 ## Start
 ```matlab
 run('E:\catrover_dumpautonomy\twin3d\startup.m')
-run_all_tests
+run_all_tests          % about 20 min (test_brain + test_maps are full fills); one test: test_bot, test_rules, ...
 ```
 
 ## Physics vs visuals

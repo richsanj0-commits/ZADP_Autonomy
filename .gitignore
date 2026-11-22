@@ -3,3 +3,7 @@ __pycache__/
 slprj/
 *.slxc
 *.asv
+twin3d/link/link_config.json
+twin3d/plan/maps_status.txt
+twin3d/plan/maps_results.mat
+twin3d/tests/_final_suite.mat

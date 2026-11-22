@@ -41,6 +41,17 @@ elseif ~isempty(live)
             if b < bestB, best = k; bestB = b; end
             if b == 0, break; end
         end
+        if bestB > 0 && numel(cand) < numel(inZ)
+            % branch after its zone, EXCEPT when every zone spot left would cut a spot off (typically
+            % the inner-row branch pocket): then a branch spot that cuts nothing off goes first, so the
+            % pocket is filled before the zone's last row closes it (Rule 1b over "branch after zone")
+            br = setdiff(inZ, cand);
+            [~, o] = sort([W.spots(br).order]); br = br(o);
+            for k = br
+                [W, b] = blocksOf(W, k, live);
+                if b == 0, best = k; bestB = 0; break; end
+            end
+        end
         zi = find([W.L.zone.n] == z, 1);
         choice(end+1) = struct('k', best, 'sec', W.L.secZone(zi), 'blocks', bestB, 'lane', false); %#ok<AGROW>
     end
@@ -71,7 +82,7 @@ end
 function [W, b] = blocksOf(W, k, live)
 % how many other live spots would lose every plan if a pile sat at spot k
 b = 0; c = [W.spots(k).x, W.spots(k).y];
-reach = 0.0868 + W.P.brain.pileR + W.P.brain.clearPile + W.P.brain.isoShift + 0.01;
+reach = W.L.reach + W.P.brain.pileR + W.P.brain.clearPile + W.P.brain.isoShift + 0.01;
 for j = live
     if j == k, continue; end
     R = W.spots(j).plan;

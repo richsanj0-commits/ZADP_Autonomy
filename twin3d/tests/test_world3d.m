@@ -3,7 +3,8 @@
 %   the origin at the rear axle; truck_pose moves the truck and tips the bed (clamped to P.truck.bedTiltMaxDeg);
 %   a pile cone has the requested radius and height within 1 % and grows with pile_growth; world_play renders 20
 %   frames of a short brain log (a dump in progress: a pile appears); world_live runs a few frames; the Simulink
-%   model zadp_twin runs 5 s with the 3D view updating (skipped with a message when Simulink cannot be loaded).
+%   model zadp_twin (built in a temp folder) runs 2 x 30 s, equals brain_run for the same seed, survives its view's
+%   figure being closed (skipped with a message when Simulink cannot be loaded).
 %   Prints "test_world3d PASSED".
 here = fileparts(mfilename('fullpath'));
 P = twin_params();
@@ -87,20 +88,48 @@ delete(s2.file);
 assert(Wl.t > 0 && isgraphics(hl.fig), 'world_live');
 close(hl.fig);
 
-% ---- Simulink: model runs 5 s with the 3D view updating
+% ---- Simulink: model built into a temp folder (the repository copy is never rewritten by a test), runs twice in
+%      a row, is the same run as brain_run for the same seed, the 3D view updates, and closing the view's figure
+%      during a run does not stop the simulation
 try
     assert(license('test', 'Simulink') == 1, 'no Simulink licence');
-    build_twin_model(fullfile(here, '..', 'simulink'));
+    mdlDir = tempname; mkdir(mdlDir);
+    % the temp copy has the same name as simulink/zadp_twin.slx on the path: expected here, so quiet
+    w0 = warning('off', 'Simulink:Engine:MdlFileShadowing'); w1 = warning('off', 'Simulink:Engine:MdlFileShadowedByFile');
+    wGuard = onCleanup(@() warning([w0 w1])); %#ok<NASGU>
+    build_twin_model(mdlDir);
     simOK = true;
 catch err
     simOK = false;
     fprintf('  test_world3d: SKIPPED the Simulink check, Simulink could not be loaded (%s)\n', err.message);
 end
 if simOK
-    r = run_twin_model(5);
-    assert(abs(r.simTime - 5) < 1e-6, 'model sim time %.3f', r.simTime);
-    assert(r.renders >= 5, 'the 3D view must update (%d updates)', r.renders);
-    assert(isfile(r.png), 'last picture');
+    mdlFile = fullfile(mdlDir, 'zadp_twin.slx');
+    load_system(mdlFile);
+    assert(strcmp(get_param('zadp_twin', 'StopTime'), '600'), 'default stop time must be 600 s');
+    assert(~isempty(find_system('zadp_twin', 'FindAll', 'on', 'Type', 'annotation')), 'model annotation missing');
+    assert(~isempty(find_system('zadp_twin', 'BlockType', 'Stop')), 'Stop Simulation block missing');
+    close_system('zadp_twin', 0);
+    r1 = run_twin_model(30, struct('folder', mdlDir));
+    r2 = run_twin_model(30, struct('folder', mdlDir));                  % twice in a row
+    [~, lg30] = brain_run(plan, P, struct('seed', 1, 'maxTime', 30));
+    assert(abs(r1.simTime - 30) < 1e-6, 'model sim time %.3f', r1.simTime);
+    assert(r1.renders >= 100, 'the 3D view must update (%d updates, 120 expected)', r1.renders);
+    assert(isfile(r1.png), 'last picture'); delete(r1.png); delete(r2.png);
+    assert(r1.piles == r2.piles && r1.coverage == r2.coverage, 'two model runs differ (%d vs %d piles)', r1.piles, r2.piles);
+    assert(r1.piles == size(lg30.piles, 1) && abs(r1.coverage - 100*lg30.coverage) < 1e-9, ...
+        'model and brain_run differ after 30 s: %d / %.6f %% vs %d / %.6f %%', r1.piles, r1.coverage, size(lg30.piles, 1), 100*lg30.coverage);
+    % the view block alone: close its figure between two steps (as a user closing the window mid-run)
+    v = View3DSystem('Visible', 'off', 'RenderPeriod', 0);
+    nbv = P.bot.count; pz = P.brain.parking(1:nbv,:);
+    args = {pz, zeros(nbv,1), zeros(nbv,1), zeros(nbv,6), zeros(130,5), 0, 0, 0, 0, 0};
+    v(args{:});
+    close(findall(0, 'Type', 'figure', 'Tag', 'zadp_twin_view'));
+    args{8} = 0.02; v(args{:});                                          % must not error
+    release(v);
+    fprintf('  Simulink: 2 x 30 s, %d piles, coverage %.4f %% (brain_run: %d, %.4f %%), %d picture updates; figure closed mid-run OK\n', ...
+        r1.piles, r1.coverage, size(lg30.piles, 1), 100*lg30.coverage, r1.renders);
+    rmdir(mdlDir, 's');
 end
 assert(numel(findall(0, 'Type', 'figure')) <= figsBefore, 'all figures closed');
 disp('test_world3d PASSED');

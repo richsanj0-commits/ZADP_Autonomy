@@ -2,7 +2,8 @@ function R = link_poll(L)
 %LINK_POLL  Read everything that arrived from the bridge since the last call (non-blocking).
 %   R = link_poll(L)
 %   R.telemetry: struct array {id, seq, encL, encR, x, y, heading, state, tRecv}   (zadp/bot<N>/telemetry)
-%   R.cam:       struct array {bot, x, y, heading, t, tRecv}                         (zadp/cam/pose)
+%   R.cam:       struct array {bot, x, y, heading, t, age, tRecv}                    (zadp/cam/pose)
+%   A robot's MQTT last will arrives as telemetry with state 'offline' and NaN numbers.
 %   tRecv = arrival time on the link clock (toc(L.t0)). Missing or null numbers become NaN.
 %   The bridge status message (mode) is stored in L.mode on the caller's side via L.st('mode').
 R = struct('telemetry', emptyTel(), 'cam', emptyCam());
@@ -32,7 +33,7 @@ for i = 1:numel(lines)
             'x', num(p, 'x'), 'y', num(p, 'y'), 'heading', num(p, 'heading'), 'state', st, 'tRecv', tNow); %#ok<AGROW>
     elseif endsWith(m.topic, '/cam/pose')
         cam{end+1} = struct('bot', num(p, 'bot'), 'x', num(p, 'x'), 'y', num(p, 'y'), ...
-            'heading', num(p, 'heading'), 't', num(p, 't'), 'tRecv', tNow); %#ok<AGROW>
+            'heading', num(p, 'heading'), 't', num(p, 't'), 'age', num(p, 'age'), 'tRecv', tNow); %#ok<AGROW>
     elseif endsWith(m.topic, '/bridge/status') && isfield(p, 'mode')
         L.st('mode') = p.mode;
     end
@@ -51,5 +52,5 @@ s = struct('id', {}, 'seq', {}, 'encL', {}, 'encR', {}, 'x', {}, 'y', {}, 'headi
 end
 
 function s = emptyCam()
-s = struct('bot', {}, 'x', {}, 'y', {}, 'heading', {}, 't', {}, 'tRecv', {});
+s = struct('bot', {}, 'x', {}, 'y', {}, 'heading', {}, 't', {}, 'age', {}, 'tRecv', {});
 end

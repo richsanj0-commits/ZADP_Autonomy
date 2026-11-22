@@ -17,13 +17,13 @@ switch op
         if abs(angdiff(h, p0(3))) > deg2rad(P.brain.turnTolDeg) + 1e-9
             error('route_steps:heading', 'drive needs a turn first (%.1f deg off)', rad2deg(angdiff(h, p0(3))));
         end
-        n = max(2, ceil(d/0.005) + 1); f = linspace(0, 1, n)';
+        n = max(2, ceil(d/P.brain.sweepStep) + 1); f = linspace(0, 1, n)';
         poses = [p0(1) + f*(arg(1)-p0(1)), p0(2) + f*(arg(2)-p0(2)), h*ones(n,1)];
         [ok, why] = route_check(poses, piles, L, P);
         if ~ok, why = ['drive: ' why]; return; end
-        % long drives are cut into pieces of <= 0.05 m that the robot passes without stopping (it
-        % steers to the end point throughout); sections are then released piece by piece
-        m = max(1, ceil(d/0.05)); cut = round(linspace(1, n, m+1));
+        % long drives are cut into pieces of <= P.brain.pieceLen that the robot passes without stopping
+        % (it steers to the end point throughout); sections are then released piece by piece
+        m = max(1, ceil(d/P.brain.pieceLen)); cut = round(linspace(1, n, m+1));
         for j = 1:m
             s = mk('drive', arg, h, 0, tol, poses(cut(j):cut(j+1), :));
             s.pass = j < m;                                  % pass-through piece: no braking

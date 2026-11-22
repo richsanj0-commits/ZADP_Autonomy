@@ -29,7 +29,7 @@ isLane = strcmp(spot.kind, 'lane');
 if ~isLane
     zi = find([L.zone.n] == spot.zone, 1);
     Z = L.zone(zi); yc = Z.yc;
-    Jin = [L.xIn, yc]; Jout = [L.xOut, yc];
+    Jin = [L.xIn, lane_turn_y(L, P, L.xIn, yc)];          % turn off the IN lane at the branch (lower if the turn would leave the site)
     if strcmp(spot.kind, 'zone'), u0 = [0, sign(yc - c(2))]; else, u0 = [-Z.side, 0]; end
     yRoad = yc;
 else
@@ -45,7 +45,7 @@ if ~ok, R.why = ['gate/IN lane ' why]; return; end
 
 % the exit tail is the same for every candidate: check it once
 if isLane, yc = NaN; end
-[~, y0] = route_exit_points(L, isLane, yc, c);
+[~, y0] = route_exit_points(L, isLane, yc, c, P);
 [tail, ok, why] = route_exit_tail(L, P, isLane, y0, pilesOut);
 if ~ok, R.why = ['exit tail ' why]; return; end
 

@@ -1,8 +1,9 @@
 function world_hud(h, tSim, nTrucks, nPiles, nSpots, covPct, collisions, note)
 %WORLD_HUD  Fill the HUD text area: sim time, site time, trucks dispatched, piles placed, coverage, collisions.
-%   Site time = sim time x 4.8 (cruise 40 m/s at site scale versus 8.3 m/s of a real hauler, SCALING.md).
+%   Site time = sim time x P.scale.siteTimeFactor (4.8: cruise 40 m/s at site scale versus 8.3 m/s of a real
+%   hauler, SCALING.md). collisions = robot-robot + robot-pile + off-site events (brain_monitor_collisions).
 if nargin < 8, note = ''; end
-ts = tSim*4.8;
+ts = tSim*h.P.scale.siteTimeFactor;
 str = sprintf(['sim time      %7.1f s\n' ...
                'site time     %02d:%02d:%02d\n' ...
                'trucks sent   %7d\n' ...

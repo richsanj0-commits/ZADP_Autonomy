@@ -4,10 +4,10 @@ function varargout = demo_link(opts)
 %   brain_run_linked, prints commands sent, telemetry received, twin-vs-real position error, command round-trip
 %   latency, and saves link\demo_link.png (twin paths solid, "real" = camera paths dashed, error vs time).
 %   Takes as long as the sim time it covers (about 2 min); no hardware, no broker needed (loopback mode).
-%   demo_link(opts): opts.maxTime (120), opts.syncToReal (false), opts.mode ('auto' | 'loopback'), opts.seed (1).
+%   demo_link(opts): opts.maxTime (120), opts.syncToReal (false), opts.mode ('loopback' (default) | 'broker' | 'auto': broker mode publishes on the REAL robot topics), opts.seed (1).
 %   [W, log, lk, procs] = demo_link(...) also returns the results.
 if nargin < 1, opts = struct(); end
-def = struct('maxTime', 120, 'syncToReal', false, 'mode', 'auto', 'seed', 1);
+def = struct('maxTime', 120, 'syncToReal', false, 'mode', 'loopback', 'seed', 1);
 f = fieldnames(def);
 for i = 1:numel(f), if ~isfield(opts, f{i}), opts.(f{i}) = def.(f{i}); end, end
 here = fileparts(mfilename('fullpath'));

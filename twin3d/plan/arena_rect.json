@@ -1,0 +1,1 @@
+{"name": "Arena rect 180x130 (1:200)", "scale": 0.005, "laneW": 24, "arena": {"w": 1, "h": 1}, "poly": [[10,10],[190,10],[190,140],[10,140]], "entryEdge": 0, "fleet": [{"name": "Bot hauler", "payload": 500, "count": 3, "L": 20, "W": 16.8}]}

@@ -1,7 +1,8 @@
 # Scaling: 1:200, set by the robot
 
 The robot (0.100 x 0.084 m) is one haul truck (20.0 x 16.8 m), so the scale is fixed at
-1:200. A bigger site later needs a bigger arena or a smaller robot. Source: `plan/plan_arena.json`.
+1:200. A bigger site later needs a bigger arena or a smaller robot. Source: `plan/plan_arena.json` (other map shapes at
+the same scale: `maps/`).
 
 | Quantity | Arena (hardware / twin) | Site (what it represents) |
 |---|---|---|
@@ -16,7 +17,8 @@ The robot (0.100 x 0.084 m) is one haul truck (20.0 x 16.8 m), so the scale is f
 
 ## Time
 Robot cruise 0.20 m/s equals 40 m/s at site scale. A real hauler does about 8.3 m/s
-(30 km/h), so the hardware runs about 4.8x faster than mine time. Logs record both arena time and site time (site time = arena time x 4.8).
+(30 km/h), so the hardware runs about 4.8x faster than site time. Logs record both arena time and site time (site time = arena time x 4.8,
+`P.scale.siteTimeFactor` = cruise x 200 / `P.scale.realHaulSpeed`).
 
 ## Piles
 Volume and radius are computed at site scale (payload, density, repose angle from the
@@ -28,6 +30,9 @@ the pile exists only in the twin.
 |---|---|---|
 | One encoder count (wheel circumference / 2772.2) | 0.0385 mm | 0.0077 m |
 | Camera position noise | 3 mm | 0.6 m |
-| Arrive tolerance | 10 mm | 2 m |
+| Camera latency | 50 ms (10 mm at cruise if not compensated; compensated with odometry) | 0.24 s site time |
+| Arrive tolerance (on the estimate, `P.ctrl.arriveTol`) | 5 mm | 1 m |
+| True arrival error (measured, 40 random go-tos, camera on) | under 10 mm (max about 6.5 mm) | under 2 m |
+| Odometry only (camera off), position / heading error | 1.7 % / 1.7 deg over 0.2 m, 6 % / 6 deg over 1 m | same |
 
 Wheel circumference = pi x 0.034 m = 106.8 mm.

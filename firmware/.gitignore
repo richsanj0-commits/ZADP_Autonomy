@@ -1,0 +1,8 @@
+# WiFi / broker credentials: never commit
+**/include/secrets.h
+# PlatformIO build output
+**/.pio/
+**/.vscode/
+# host test binaries
+**/test/host/test_motion_core
+**/test/host/test_motion_core.exe

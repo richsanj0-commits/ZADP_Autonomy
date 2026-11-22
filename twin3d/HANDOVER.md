@@ -36,16 +36,30 @@ Start every session: `run('E:\catrover_dumpautonomy\twin3d\startup.m')` (puts th
 
 **plan\\**
 - `plan_arena.json` is the exported plan; `arena_site.json` is the input of the exporter (site metres).
+- Three more arena shapes, same fleet and scale: `arena_rect.json` (180 x 130 m rectangle), `arena_lshape.json` (L, arm up
+  the left side, non-convex), `arena_hex.json` (irregular hexagon) -> `plan_<name>.json` / `.png`. `brain\demo_maps` runs the
+  full fill on all four and writes `maps_results.md`, `fill_<name>.png`, `fill3d_<name>.png`.
+
+**maps\\** four more map shapes (`<name>_site.json` -> `plan_<name>.json`: trapezoid, chamfered rectangle, mirrored pentagon,
+octagon), tested by `test_maps`; `maps\README.md`.
 - `load_plan(file)` reads a plan and normalises the arrays jsondecode returns. `plot_plan(plan, 'off')` 2D overview.
 
 **bot\\** (one robot, phase 3)
-- `bot_init(P, pose0, id)` state; `bot_step(s, cmd, P, dt)` motor lag, accel limit, encoders, slip, true pose.
-- `bot_odometry` dead reckoning from counts. `bot_controller(pose, target, P)` go-to-point (mirror of the firmware).
-- `cam_measure(truePose, P)` noisy camera fix. `pose_fusion(s, z, P)` pulls the estimate to the fix (gain 0.5).
+- `bot_init(P, pose0, id, rs)` state (rs = random stream, the brain passes its own); `bot_step(s, cmd, P, dt)` motor lag,
+  accel limit, encoders, slip, true pose, trapezoidal wheel travel, short pose history `s.hist`.
+- `bot_odometry` dead reckoning from counts. `[cmd, arrived, rot] = bot_controller(pose, target, P, rot)` go-to-point
+  (mirror of the firmware): rotate-in-place with hysteresis (enter 25 deg, leave 15 deg), never inside the 3 cm capture
+  radius (there it drives, backing up if the goal is behind, with the heading correction fading to 0).
+- `[z, tz] = cam_measure(s, P)` noisy camera fix of the pose `P.cam.latency` (50 ms) ago. `pose_fusion(s, z, P, tz)`
+  moves the fix forward by the odometry since `tz` (latency compensation) and pulls the estimate to it (gain 0.3).
+  `hist_at` interpolates the pose history.
 - `bot_goto` runs controller + physics to arrival. `demo_one_bot` one robot entry to exit.
 
 **brain\\** (dispatcher, phases 4-5; details in `brain\README.md`)
-- `brain_init(plan, P, seed)` world `W`. `brain_step(W, P, dt)` one step. `brain_run(plan, P, opts)` whole run + safety monitors + log.
+- `brain_init(plan, P, seed)` world `W` (checks the map with `assert_plan_supported`; own random stream `W.rs`). `brain_step(W, P, dt)` one step.
+  `brain_run(plan, P, opts)` whole run + safety monitors + log (ends at a deadlock). `brain_monitor` the monitors (robot-robot,
+  robot-pile, off-site, section ownership) for every viewer; `brain_monitor_collisions` the one "collisions" number;
+  `brain_owner_check` the Rule 3 invariant.
 - `brain_layout`, `brain_sections` junction points, apron loop, lane sections. `brain_rank` fill order (Rules 1, 1b, 4).
 - `brain_spot_plan`, `brain_piles_changed`, `brain_obstacles` plan cache, invalidation when a pile lands near a planned path.
 - `route_to_spot` full trip P1 -> dump stop -> P3; `route_exit`, `route_exit_points`, `route_exit_tail` the way out;
@@ -60,33 +74,48 @@ Start every session: `run('E:\catrover_dumpautonomy\twin3d\startup.m')` (puts th
 - `solid_box`, `solid_prism`, `solid_wheel` primitives. `demo_3d` writes `demo_3d.png` and `demo_3d.mp4`.
 
 **simulink\\** (`simulink\README.md`)
-- `zadp_twin.slx`: `BrainSystem` (source) -> `View3DSystem` (sink), fixed step 0.02 s. `build_twin_model` rebuilds it, `run_twin_model(60)` runs it.
+- `zadp_twin.slx`: `BrainSystem` (source) -> `View3DSystem` (sink), fixed step 0.02 s, stop time 600 s, Stop block on
+  `done`, annotation on the canvas, path callbacks (opens in a fresh MATLAB). `build_twin_model` rebuilds it,
+  `run_twin_model(60)` runs it (hidden view, model left unchanged).
 
 **link\\** (MQTT, phase 7; `link\README.md`, `link\TOPICS.md`)
-- `link_open`, `link_send_cmd`, `link_poll`, `link_close` MATLAB side (base MATLAB `tcpclient`). `link_keepalive` repeats the last command every 100 ms, `link_stop_all`.
+- `link_open`, `link_send_cmd`, `link_poll`, `link_close` MATLAB side (base MATLAB `tcpclient`). `link_keepalive` = heartbeat to bridge.py (the bridge repeats each robot's last command at 10 Hz while MATLAB was heard within 1 s), `link_stop_all`. `run_real` = one-command launcher (real / dry), `link_write_config` = numbers for the Python side and the firmware check.
 - `link_from_brain(W, Wprev, L)` route-step changes to commands. `brain_run_linked` brain with the link, paced to real time, `opts.syncToReal`.
 - `link_launch`, `link_kill`, `link_python` start/stop and find the Python processes (PID checked).
 - `py\bridge.py` TCP <-> MQTT (or loopback router). `py\fake_bot.py` stand-in for the ESP32s and camera. `py\transport.py` clients. `py\aruco_node.py` camera node (never run on a camera).
 
-**tests\\** `test_*.m` scripts and `run_all_tests.m`. **Repo root `tools\`**: `export_plan.py` (plan export), `make_screenshots.py` (web app screenshots).
+**Repo root `firmware\zadp_bot\`** (ESP32 robot firmware, PlatformIO + arduino-esp32 core 2.0.17, FreeRTOS; details in
+`firmware\README.md`). Five pinned FreeRTOS tasks, no polling loop: `control` (core 1, prio 20, 200 Hz `vTaskDelayUntil`:
+PCNT encoders, odometry, camera fusion, go-to / turn laws, wheel PI, PWM, 300 ms command watchdog, 0.3 s link-loss stop),
+`telemetry` (core 0, prio 6, 20 Hz + at once on a new seq), `comms` (core 0, prio 5, WiFi + MQTT state machine with
+backoff, JSON parsing), `console` (core 1, prio 2, serial bench self-test, boot stack report), `health` (core 1, prio 1,
+LED). Queues: `ctrlQ` (commands, FIFO), `camQ` and `snapQ` (length 1, overwrite). The task watchdog (1 s, reset) watches
+only the control task. The maths is `include\motion_core.h`, mirrored by `test\host\js_mirror\mirror_test.js`; its
+numbers are checked against `twin_params.m` by `test_firmware`.
+
+**tests\\** `test_*.m` scripts and `run_all_tests.m`; `check_brain_run` (one full fill with every assert, used by
+`test_brain` and `test_maps`). **Repo root `tools\`**: `export_plan.py` (plan export, `--out` for other maps),
+`make_screenshots.py` (web app screenshots).
 
 ## 4. Contracts in brief
 - **plan.json** (`plan\load_plan.m`, written by `exportPlan` in `zadp_game.html`): `version`, `site`, `scale`, `arena{w,h}`, `boundary`, `safe`, `entry{pt,n,t}`,
   `spine{poly, inLine, outLine, width}`, `zones[{n, poly, branch, branchDepth, depth}]`, `trucks[{id, name, payload, count, pileR, L, W, turnR}]`,
   `spots` keyed by truck id, each `{x, y, zone, kind (zone|branch|lane), order}`. Arena metres. Current plan: 125 spots (72 zone, 14 branch, 39 lane), pile radius 0.0353 m, one truck type.
-- **MQTT** (full text and the ESP32 checklist in `link\TOPICS.md`): `zadp/bot{1-3}/cmd` `{id, truck, seq, action, x, y, heading, speed[, dir]}`;
-  `zadp/bot{1-3}/telemetry` `{id, seq, encL, encR, x, y, heading, state}` at 20 Hz; `zadp/cam/pose` `{bot, x, y, heading, t}` at 30 Hz.
-  Same `seq` = keep-alive, new `seq` replaces the command. Robot stops after 300 ms without a command line. `arrived` only when the wheels have stopped.
+- **MQTT** (the single contract: `link\TOPICS.md`): `zadp/bot{1-3}/cmd` `{id, truck, seq, action, x, y, heading, speed[, dir, tol]}`;
+  `zadp/bot{1-3}/telemetry` `{id, seq, encL, encR, x, y, heading, state}` at 20 Hz; `zadp/cam/pose` `{bot, x, y, heading, t, age}` at 30 Hz.
+  Same `seq` (uint32) = repeat, new `seq` replaces the command. bridge.py repeats the last command at 10 Hz while MATLAB was heard within 1 s;
+  the robot stops after 300 ms without a cmd message. `arrived` only when the wheels have stopped (also for `stop`). goto: no final turn.
+  Numbers for the Python side and the firmware check: `link_write_config` -> `link\link_config.json`.
   Frame: arena, origin lower left, x right, y up, heading CCW from +x, metres and radians.
 
 ## 5. Brain rules and lane sections (plain words; each is also a comment in the code)
-1. Fill order: in a zone take the lowest plan order that is reachable now; use the other zone when the first is locked. 1b: skip a spot whose pile would cut off the approach of another reachable spot until that one is filled. Branch spots after their zone.
+1. Fill order: in a zone take the lowest plan order that is reachable now; use the other zone when the first is locked. 1b: skip a spot whose pile would cut off the approach of another reachable spot until that one is filled. Branch spots after their zone, unless every zone spot left would cut a spot off (then a branch spot that cuts nothing off goes first: the inner-row pocket).
 2. Zone lock: a zone with its branch road has one holder at a time.
-3. Lane mutex: the drivable area is cut into sections; a robot may start a move only while it holds every section its swept body (+8 mm) touches.
+3. Lane mutex: the drivable area is cut into sections; a robot may start a move only while it holds every section its swept body (+8 mm) touches. Long drives are cut into 5 cm pass-through pieces; a section is released only when the robot has passed the end of the last piece that needs it. Invariant, checked every step (monitor e): every section a true body touches is held by that robot.
 4. Spine (lane) spots last: only when no zone or branch spot is reachable and no zone trip is running; deepest first; one truck, everybody else parked.
 5. Dumping: rear to the spot, stop = spot + u*D with D = pile radius + axle-to-back + 8 mm (longer only if blocked), wait `P.truck.dumpTime`; the pile appears where the truck really stopped and stays an obstacle forever.
 6. Never start what you cannot finish: the whole inbound route and zone lock are granted at once before a truck leaves the queue head; the whole exit route before it leaves the dump stop. Waiting happens only in apron slots or at the dump stop.
-7. Deadlock watch: a wait cycle of 10 s, or nobody moving for 60 s while trips are open, is reported.
+7. Deadlock watch: wait-for graph (sections and queue slots); a cycle for 10 s, or nobody moving or dumping for 60 s before the run has ended, is a deadlock and ends `brain_run`.
 8. End: when nothing can be served all robots park in P1..P3; each unfilled spot keeps the reason its last plan failed.
 
 Sections: `Z1`, `Z2` (zone + branch), `IN_LOW`, `OUT_LOW` (each lane below the junction plus the apron strip), `J` (spine width around the branch roads), `UP` (spine above), apron `APR_R`, `QW`, `QM`, `Q2S`, `Q3S`.
@@ -94,10 +123,11 @@ Apron loop (one way): queue row heading west, P1 under the IN lane -> IN lane ->
 Parking is a rolling queue: a returning robot always parks at P3 and moves up to P1. Every entry from P1 is a new truck. Why there is no deadlock: `brain\README.md`.
 
 ## 6. Parameters (`twin_params.m`)
-`P.bot` real robot (wheel 34 mm, track 75.3 mm, 2772.2 counts/rev, 300 rpm, 0.20 m/s cruise, 0.5 m/s^2, slip 1 %, chassis 0.100 x 0.084 m, axle to nose 0.076 / back 0.024) | `P.arena`, `P.scale` (1 m, apron 0.25 m, 0.005 arena m per site m) |
-`P.cam` (30 Hz, 3 mm, 1 deg, gain 0.5) | `P.sim` (dt 0.01 s, used by bot-only tests) | `P.truck` visual only (size, bed tilt 50 deg, dumpTime 4 s, colours) |
-`P.pile` (repose 37 deg, density 1.8 t/m^3, load factor 0.85..1.00) | `P.ctrl` onboard controller gains and tolerances (arrive 5 mm, heading 3 deg) |
-`P.brain` (dt 0.02 s, clearances 7 / 4 / 8 mm, dump margin, approach fan, parking slots P1..P3, deadlock times) | `P.mqtt` broker, port, topic formats.
+`P.bot` real robot (wheel 34 mm, track 75.3 mm, 2772.2 counts/rev, 300 rpm, 0.20 m/s cruise, 0.5 m/s^2, slip 1 %, chassis 0.100 x 0.084 m, axle to nose 0.076 / back 0.024) | `P.arena`, `P.scale` (1 m, apron 0.25 m, 0.005 arena m per site m, site time factor 4.8) |
+`P.cam` (30 Hz, 3 mm, 1 deg, latency 50 ms compensated, gain 0.3) | `P.sim` (dt 0.01 s, used by bot-only tests) | `P.truck` visual only (size, bed tilt 50 deg, dumpTime 4 s, colours) |
+`P.pile` (repose 37 deg, density 1.8 t/m^3, load factor 0.85..1.00) | `P.ctrl` onboard controller gains and tolerances (arrive 5 mm, heading 3 deg, rotate 25 / 15 deg hysteresis, capture radius 3 cm) |
+`P.brain` (dt 0.02 s, clearances 7 / 4 / 8 mm, dump margin, approach fan, apron return row y -0.0555, parking slots P1..P3 at y -0.159, drive pieces 5 cm, line-following lookahead 0.15 m, junction and exit margins, deadlock times) | `P.mqtt` broker, port, topic formats |
+`P.bot.trackScale` (1.0; effective track `P.bot.trackEff`, must equal firmware `TRACK_SCALE`) | `P.cam` marker ids, sizes, corner positions, heights, offset, capture delay | `P.link` watchdog 0.3 s, bridge repeats 10 Hz, hostTimeout 1.0 s, heartbeat, net delay, run_real tolerances.
 `tests\test_params.m` checks the groups exist; add a group there when you add one.
 
 ## 7. Pile maths
@@ -124,7 +154,15 @@ The scale is fixed by the robot size. A bigger site needs a bigger arena or a sm
 2. In the repo root: `python -m http.server 8777` (leave running), then `python tools\export_plan.py --arena twin3d\plan\arena_site.json` (optional `--rows N` = pile rows each side of a branch). Needs Playwright and Chrome. Writes `twin3d\plan\plan_arena.json`.
 3. In MATLAB: `plan = load_plan('E:\catrover_dumpautonomy\twin3d\plan\plan_arena.json'); plot_plan(plan,'off')` to look at it, then `run_all_tests`.
 4. `test_plan` pins the current design (1 x 1 m, one truck type, count 3, 0.100 x 0.084 m, pile radius 0.02..0.06 m, spine at least 0.24 m, zones at least 0.084 m wide, boundary at least 0.04 m from the edge). A different design needs those asserts reviewed on purpose.
-5. The brain layout (`brain_layout`, `P.brain.parking`, `P.brain.apronRowY`) is built for this plan's two-zone, one-spine shape with P1 under the IN lane; a different shape needs layout and section work, not only a new plan. Spots the brain cannot reach are reported, not hidden.
+5. Another map next to the reference one: put `<name>_site.json` in `maps` and run `python tools/export_plan.py --arena twin3d/maps/<name>_site.json --out ../maps/plan_<name>.json` (`--out` is relative to `twin3d/plan`; without it the reference `plan_arena.json` is overwritten). Add it to the list in `tests/test_maps.m`.
+6. Supported map family (`brain/assert_plan_supported.m`, called by `brain_init`, refuses anything else with a clear message): simple site polygon, convex or not (an L works: `in_allowed` does exact point-in-polygon plus edge distance, `route_check` and the site monitor keep the body clear of inner (reflex) corners, `lane_turn_y` moves the lane-to-branch turn down when a branch runs close to a site edge across the spine); entry on the horizontal bottom edge with the IN lane over parking P1 (x 0.44, i.e. entry centred at x = 0.5 with the 24 m lane); exactly two zones, one each side of the spine, at most one branch each; inside the arena; one truck type. Why each limit exists, i.e. what a wider family needs:
+   - non-convex sites: supported (see above); polygons with holes are not;
+   - entry facing +y: `brain_layout`, `brain_sections` (sections are x/y bands), the mouth and apron rectangles, `world_build` `berm_build` (finds the entry edge by y);
+   - parking: `P.brain.parking` is fixed (x 0.44 / 0.75 / 0.90, y -0.159) and P1 must sit under the IN lane; another spine x needs parking derived from the spine;
+   - zones: sections `Z1`/`Z2` are hard-wired left/right (`brain_layout` `secZone`, `brain_sections`); three zones, or two on one side, need a section list built from `plan.zones`; only `z.branch{1}` is used and `route_to_spot` assumes one horizontal branch band per zone; the junction box spans all branch rows (`junctionMargin`), so branch rows far apart make it very large;
+   - exits: `route_exit_points` picks the exit side by `pose(1) < xMid`;
+   - fleet: `brain_init` uses `plan.trucks(1)` only.
+   Spots the brain cannot reach are reported, not hidden.
 
 ## 10. Run each demo (MATLAB MCP, after `startup`)
 | Command | What | Time |
@@ -144,38 +182,71 @@ Calls longer than about 60 s need a timer or slices (`opts.maxTime`), see `CLAUD
 |---|---|
 | `test_params` | all parameter groups exist, robot and scale numbers, truck visual = robot footprint, `pile_geometry` volume law |
 | `test_plan` | `plan_arena.json` loads, zones/orders consistent, spots inside the boundary, 1:200, three robot-size trucks, lane and zone widths |
-| `test_bot` | one wheel turn = 2772 counts, straight and turn-around accuracy, speed and accel limits, odometry drifts without camera, camera keeps arrival error under 10 mm |
+| `test_bot` | one wheel turn = 2772 counts, straight and turn-around accuracy, speed and accel limits, odometry drifts without camera, camera keeps arrival error under 10 mm, camera latency modelled and compensated (bias under 2 mm), wheel travel independent of dt, controller never rotates in place inside the capture radius |
 | `test_piles` | pile formula vs plan radius, volume law, growth, truck numbers 1,2,3.. with no repeats, pile records complete, coverage maths, single parking source, monitors zero over 300 s |
-| `test_world3d` | 3D world handles, truck footprint and bed tilt, pile size, replay and live frames, Simulink model runs 5 s (hidden figures) |
-| `test_link` | command reaches fake robot, payloads match `TOPICS.md` field for field, 30 s linked run error and latency, syncToReal, 300 ms watchdog, no processes left; SKIPs without Python |
-| `test_brain` | 3 seeds: zero overlaps, pile hits, off-site, deadlocks; piles within 15 mm of spot; at least 85 % filled; zone lock; two robots inside at once |
+| `test_world3d` | 3D world handles, truck footprint and bed tilt, pile size, replay and live frames; Simulink model (built in a temp folder): stop time 600, annotation, Stop block, two 30 s runs in a row equal to each other and to `brain_run`, view block survives its figure being closed |
+| `test_link` | loopback mode only, time-based seq base, command reaches fake robot, payloads match `TOPICS.md` field for field, 30 s linked run error and latency, syncToReal, 300 ms watchdog, no processes left; SKIPs without Python |
+| `test_brain` | 3 seeds (`check_brain_run`): zero overlaps, pile hits, off-site, section-ownership violations, deadlocks, failed exit re-plans; normal end; piles within 15 mm of spot; at least 98 % filled; zone lock; lane spots last and alone; two robots inside at once |
+| `test_maps` | 400 s sim (seed 1) on the 4 arena shapes in `plan\` (arena, rect, lshape, hex) and the 4 in `maps\`: all monitors 0, zone lock, two robots inside at once, a pile in every zone; a self-intersecting site is refused with a clear message. Full fills of the 4 arena shapes: `demo_maps` -> `plan\maps_results.md` |
+| `test_rules` | 60 s section-ownership check; forced wait cycle and forced no-progress stall are each flagged once and end the run; `W.hold` holds and releases a robot |
 
-Last run: ALL TESTS PASSED in 404.9 s; `test_brain` 379 s, everything else about 26 s together. `test_brain` is the slow one: run it in slices or via a timer.
+Last run: ALL TESTS PASSED in 445.1 s; `test_brain` 249 s, `test_maps` 76 s (8 maps x 400 s sim). Run the suite via a timer (a blocked MATLAB MCP call times out and interrupts it).
 
 ## 12. Measured results (verified runs)
-- Seed 1 full run: 123 of 125 piles (spots 41 and 100 unfilled), coverage 57.9 %, 57148 t dumped, 123 trucks numbered, sim time 2851 s. Seeds 2 and 3: 124 of 125. Piles span r 6.70-7.06 m, payload 426-500 t.
-- Safety monitors all zero. Min robot gap 12.7 mm, min pile gap 4.9 mm (seed 1). The 300 s test run numbered 14 trucks.
-- 3D: replay 8.2 frames/s (1280 x 720, hidden); `demo_3d.mp4` 30.0 s, 901 frames, 11.4 MB (limit 15 MB). Simulink 60 s: 2 piles, coverage 0.919 %, collisions 0 (`brain_run` 60 s: 2 piles, 0.918 %).
+- Reference plan, seeds 1 / 2 / 3: 125 / 125 / 125 of 125 piles, sim time 2873 / 2881 / 2888 s, min robot gap 12.1 / 11.5 / 9.9 mm, min pile gap 5.3 / 3.4 / 4.4 mm, worst pile-to-spot error 6.3 / 5.4 / 6.4 mm, 0 exit re-plans.
+- Arena shapes in `plan\` (`demo_maps`, seed 1, all monitors 0): arena 125 / 125, rect 86 / 86, lshape 82 / 82, hex 97 / 98
+  (lane spot order 36 next to the narrowing top: its dump stop overlaps a zone pile that spills 3 mm into the spine). Table: `plan\maps_results.md`.
+- Other maps (seed 1, before the non-convex change): trapezoid 109 / 109, chamfered 121 / 121, mirrored pentagon 126 / 126, octagon 115 / 115.
+- Every monitor zero in all of these runs: robot-robot, robot-pile, off-site, section ownership, deadlocks. The 300 s test run numbered 15 trucks.
+- 3D: replay 8.2 frames/s (1280 x 720, hidden); `demo_3d.mp4` 30.0 s, 901 frames, 11.4 MB (limit 15 MB). Simulink 30 s: 2 piles, coverage 0.9184 %, identical to `brain_run` 30 s (own random stream).
 - Link (loopback, fake robots): demo 120 s, 115 commands, 115 of 115 acknowledged, twin-vs-real position error mean 5.2 mm, worst 24.8 mm, worst heading error 11.6 deg, command round trip mean 12.9 ms (worst 24.7), twin violations 0. 20 s syncToReal run: worst error 23.7 mm.
 - No broker was present (paho-mqtt 2.1.0 installed, no mosquitto): the MQTT broker path was never exercised here.
 
 ## 13. Known limits
-- 1-2 spots stay unreachable (41 in zone 1, 100 in zone 2, depending on noise): inner-row branch spots sit in a pocket between the branch outer row and the zone's last row; the channel left (about 0.057 m) is narrower than the truck (0.084 m), and the forward-only robot needs a 180 degree in-place turn at the dump stop (nose sweep radius 0.087 m).
-- Odometry only drifts (about 1 % of distance with slip 1 %); the camera fix (gain 0.5) is what keeps arrival errors small. Camera latency (50 ms) is not modelled or compensated.
+- Inner-row branch spots (41, 100) sit in a pocket that the zone's last row closes (channel 0.057 m < truck 0.084 m). They are now filled first (Rule 1b over branch-after-zone); a plan with a different pocket could still lose a spot, reported, not hidden.
+- The apron is cramped: margins at the return-row corner (7.5 mm to the apron top), the queue band (9.75 mm) and the P3 turn (4 mm planned to the apron bottom) are only a few mm more than the tracking error. Stops are centred on their end point (predicted coast) and drives follow the leg line; keep that in the firmware.
+- Odometry alone (camera off) drifts much faster than the 1 % slip suggests, because the left/right scale difference integrates into heading: about 1.7 % / 1.7 deg over 0.2 m, 6 % / 6 deg over 1 m, 13 % / 13 deg over 4 m (150 runs). The camera fix (gain 0.3) is what keeps arrival errors small.
+- Camera latency (50 ms) is modelled (`cam_measure` returns the pose of 50 ms ago) and compensated in `pose_fusion` with the odometry since the image time; uncompensated, the estimate would lag about 10 mm at cruise, more than the 7 mm pile clearance. The firmware must do the same (`link/TOPICS.md` checklist). `fake_bot.py` does the same.
 - `aruco_node.py` is written but NEVER run against a camera; expect to tune it (no undistortion; the apron outside the four corner markers is extrapolated).
-- The real firmware still speaks TCP port 23, not MQTT. The MQTT broker path of `bridge.py` is untested here.
+- The FreeRTOS firmware (`firmware/zadp_bot`) has never been built by PlatformIO (only syntax-checked with the xtensa
+  compiler against the arduino-esp32 2.0.17 headers, libraries stubbed) and has never run on an ESP32, and the broker path of `bridge.py` / `aruco_node.py` was never connected to a real broker or camera here (no broker, no OpenCV on this PC); `run_real('dry')` tests the same code path with loopback, fake robots and a simulated camera.
 - A fixed parking bay per robot is NOT implemented: a rolling queue P3 -> P2 -> P1 is used (a fixed bay would need a wider apron and breaks the all-or-nothing section grants).
 - Lane (spine) spots are filled last, one truck at a time, deepest first; the others wait parked.
 - Three robots stand for an endless stream of trucks; truck numbers are labels, not separate robots.
 - Piles exist only in the twin. The 3D view is base MATLAB graphics (software rendering, about 8 frames/s at 1280 x 720).
-- Brain and link are tuned for the current plan shape (section 9, point 5). The web app's truck order setting (random, big first, ...) does not matter here: one truck type.
+- Brain and link work for the map family of section 9, point 6 (`maps\` has four more shapes). The web app's truck order setting (random, big first, ...) does not matter here: one truck type.
 - Memory: do not start a second MATLAB or the Unreal viewer on the 16 GB PC.
 
 ## 14. What the user does next (real robots)
-1. Firmware (ESP32): join MQTT per the checklist in `link\TOPICS.md` (client id `zadp-bot<N>`, subscribe `cmd`, publish telemetry at 20 Hz and once on each new command, same controller numbers, 300 ms watchdog, `arrived` only when stopped).
-2. Broker: install Mosquitto, `listener 1883` and `allow_anonymous true` on a closed test network, run `mosquitto -v`. `pip install paho-mqtt` (and `opencv-python numpy` for the camera). Set `P.mqtt.broker` to the broker PC address; the firmware needs the same address.
-3. Test the PC side with fake robots against the real broker: `python link\py\fake_bot.py --bots 1,2,3 --broker localhost`, and `python link\py\bridge.py --broker <ip> --broker-port 1883 --no-fallback --port 18830`.
-4. Camera: print ArUco DICT_4X4_50 markers (ids 1-3 on the robots, centred over the axle, up edge to the nose; ids 10-13 at the arena corners, at least 25 mm). Mount the camera straight above, fixed exposure, whole arena plus apron in view. Run `python link\py\aruco_node.py --camera 0 --broker localhost --show`, check poses against a ruler, tune (undistortion, apron markers).
-5. First single-robot test: put one robot on parking slot P1 (`P.brain.parking`). The link has no one-robot mode: the twin runs all three robots and sends commands to ids 1-3, so commands for robots 2 and 3 get no answer. Therefore run WITHOUT `syncToReal` first (with it the twin would wait `holdTimeout` = 20 s for each missing robot), and read only robot 1 in `lk`. In MATLAB: `L = link_open(P, struct('port',18830)); [W,log,lk] = brain_run_linked(plan, P, struct('link',L,'maxTime',60)); link_close(L);` Keep a hand near the power switch. `link_close` sends stop to all robots.
-6. Raise `maxTime` step by step, compare twin and real error in `lk`. Use `syncToReal = true` only when every real robot present answers.
-7. Then three robots on P1..P3, short runs first, full fill last. Hardware runs at 0.20 m/s, so a full fill (2851 s sim time) takes as long in wall time.
+Everything below runs on the PC that runs MATLAB unless said otherwise. Nothing is installed by the repository.
+
+1. **Broker** (Windows, Mosquitto 2.x): run the Windows installer from mosquitto.org/download, create
+   `C:\mosquitto\zadp.conf` with
+   ```
+   listener 1883 0.0.0.0
+   allow_anonymous true
+   ```
+   (closed test network only; Mosquitto 2 without a listener line accepts only localhost), allow inbound TCP 1883 in
+   the Windows firewall, stop the installed service if it runs (`net stop mosquitto`, admin shell) and start
+   `"C:\Program Files\mosquitto\mosquitto.exe" -v -c C:\mosquitto\zadp.conf`.
+   Set `P.mqtt.broker` in `params\twin_params.m` to this PC's LAN address (or `'localhost'` when MATLAB runs on it).
+2. **Python** (yourself): `pip install paho-mqtt numpy opencv-contrib-python pillow`.
+3. **Flash** (per robot N = 1..3): `firmware\zadp_bot\include\secrets.h` from `secrets.example.h` (WiFi, `MQTT_HOST` = the
+   broker address), `pio run -e botN -t upload` (`botN_pcb` for BIN2 on GPIO 5; `bot1_isr` = GPIO-interrupt encoders
+   if PCNT misbehaves; the first build needs internet once to fetch PubSubClient 2.8 and ArduinoJson 7.2.1), then
+   `pio device monitor -e botN`: boot banner, task stack report after 3 s (no `LOW` line), then the bench self-test
+   (`firmware\README.md` section 3; `w` = task stacks, `i` = status with overruns and exec time). If you calibrate `TRACK_SCALE`, write the same value into `P.bot.trackScale`; `test_firmware` checks it.
+4. **Markers**: in MATLAB `link_write_config(twin_params())`, then `python link\markers\make_markers.py`; print
+   `robots_A4.pdf` and `corners_A4.pdf` at 100 %, check the 50 mm bar. Robot marker id N on robot N, centred on the top,
+   arrow to the nose. Corners 10-13 at `P.cam.cornerXY` (`placement.txt`), on blocks so their plane is the robot marker
+   plane (measure the robot top height and set `P.cam.markerHeight` = `P.cam.cornerHeight`).
+5. **Camera**: straight above the arena, whole arena + apron + corner markers in view, fixed focus and exposure. Check it
+   alone: `python link\py\aruco_node.py --camera 0 --broker <ip> --show` (prints `homography ready`, then poses).
+   Optional: `--calib` with an OpenCV camera calibration.
+6. **Robots** on parking slots P1, P2, P3 (`P.brain.parking`: x 0.44 / 0.75 / 0.90, y -0.159, heading west), powered.
+7. **Run**: `run('E:\catrover_dumpautonomy\twin3d\startup.m')`, then `R = run_real();` (first `run_real('real',
+   struct('maxTime', 60))`). It checks broker, Python modules, corners, telemetry + poses of all three robots and the
+   slots, then runs with `syncToReal`; close the view or Ctrl+C to stop all robots. `run_real('dry')` is the same path
+   without hardware.
+8. Raise `maxTime` step by step; `R.lk` holds twin-vs-real error, latency and hold times per robot. A full fill
+   (about 2880 s sim time) takes as long in wall time.

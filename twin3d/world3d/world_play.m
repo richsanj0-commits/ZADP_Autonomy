@@ -33,16 +33,22 @@ S = struct('c', cell(1, n), 'r', 0, 'h', 0, 'frac', 0, 'key', 0);
 for k = 1:n, S(k) = struct('c', log.piles(k,:), 'r', pr(k).rArena, 'h', pr(k).hArena, 'frac', 0, 'key', pr(k).spot); end
 cov = coverage_curve(log.piles, [pr.rArena], plan);
 ev = log.events; tAssigned = [ev(strcmp({ev.type}, 'assigned')).t];
-m = log.mon; collisions = m.rrOverlapEvents + m.pileHitEvents + m.boundEvents;
+m = log.mon;            % collisions shown = events up to the frame time (brain_monitor records each event's time)
+hasTimes = isfield(m, 'rrWhere');
 nSpots = numel(log.spots);
 
 % ---- scene and output
 h = world_build(plan, P, struct('visible', opts.visible, 'size', opts.size, 'fig', opts.fig));
 if ~strcmp(opts.visible, 'on'), fitFrame(h.fig, opts.size); end     % hidden: frames are exactly opts.size pixels
 vw = []; gifFile = '';
+% an error in any frame (figure closed, getframe failure) must not leave the video file open/locked or a
+% hidden figure alive: both are closed by these cleanups (a figure passed in by the caller is left alone)
+ownFig = isempty(opts.fig) && ~isempty(opts.file);
+figGuard = onCleanup(@() closeFig(ownFig, h.fig)); %#ok<NASGU>
 if ~isempty(opts.file)
     try
         vw = VideoWriter(opts.file, 'MPEG-4'); vw.FrameRate = opts.fps; vw.Quality = opts.quality; open(vw);
+        vwGuard = onCleanup(@() close(vw)); %#ok<NASGU>
     catch err
         warning('world_play:video', 'MPEG-4 unavailable (%s): writing an animated GIF instead', err.message);
         vw = []; gifFile = [regexprep(opts.file, '\.[^.\\/]*$', ''), '.gif'];
@@ -52,6 +58,7 @@ dtv = opts.speed/opts.fps;
 nF = min(opts.maxFrames, floor((opts.tEnd - opts.tStart)/dtv + 1e-9) + 1);
 tic0 = tic; nWritten = 0;
 for fi = 1:nF
+    if ~isgraphics(h.fig), nF = fi - 1; break; end          % figure closed by the user: stop the replay
     t = opts.tStart + (fi - 1)*dtv;
     % poses: linear between the log samples, heading along the short way
     i0 = find(log.t <= t, 1, 'last'); if isempty(i0), i0 = 1; end
@@ -74,6 +81,7 @@ for fi = 1:nF
     truck = double(log.truck(i0,:));
     world_sync(h, struct('pose', pose, 'bed', bed, 'truck', truck, 'piles', S(1:nStarted)));
     nDone = sum(pt <= t);
+    if hasTimes, collisions = brain_monitor_collisions(m, t); else, collisions = m.rrOverlapEvents + m.pileHitEvents + m.boundEvents; end
     world_hud(h, t, sum(tAssigned <= t), nDone, nSpots, 100*cov(nDone + 1), collisions, ...
         sprintf('replay x%g', opts.speed));
     switch lower(opts.view)
@@ -96,12 +104,16 @@ for fi = 1:nF
 end
 wall = toc(tic0);
 file = opts.file; bytes = 0;
-if ~isempty(vw), close(vw); end
+if ~isempty(vw), clear vwGuard; end                       % closes the video file
 if ~isempty(gifFile), file = gifFile; end
 if ~isempty(file) && isfile(file), d = dir(file); bytes = d.bytes; end
 stats = struct('frames', nF, 'wall', wall, 'fps', nF/wall, 'videoSeconds', nF/opts.fps, 'file', file, 'bytes', bytes, ...
     'fig', h.fig, 'world', h);
-if isempty(opts.fig) && ~isempty(opts.file) && isgraphics(h.fig), close(h.fig); stats.fig = []; end
+if ownFig, stats.fig = []; end                              % figGuard closes it
+end
+
+function closeFig(own, fig)
+if own && isgraphics(fig), close(fig); end
 end
 
 function fitFrame(fig, sz)

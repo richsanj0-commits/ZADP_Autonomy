@@ -14,8 +14,10 @@
 - New arena plan: `python -m http.server 8777`, then `python tools/export_plan.py --arena twin3d/plan/arena_site.json` (writes `twin3d/plan/plan_arena.json`; needs Playwright + Chrome).
 - Twin (MATLAB MCP tool, `project_path` `E:\catrover_dumpautonomy\twin3d`): first `run('E:\catrover_dumpautonomy\twin3d\startup.m')`.
   Demos: `demo_brain`, `demo_3d`, `demo_link`, `demo_one_bot`, `run_twin_model(60)`. Tests: `run_all_tests` (all) or one `test_*`.
-- A full `run_all_tests` takes about 7 minutes (`test_brain` alone about 6.3 min: 3 full fills). One MATLAB tool call times out near 60 s: start long jobs with a MATLAB timer or slice them (`opts.maxTime`), save results to a .mat file and poll. A timeout does not mean the run failed.
-- Last full run: ALL TESTS PASSED, 404.9 s (seed 1/2/3: 123/124/124 of 125 piles).
+- Real robots: `run_real()` (one command; launch order in `twin3d/HANDOVER.md` section 14); `run_real('dry')` = same path with fake robots + simulated camera (`test_run_real`, about 95 s). Contract: `twin3d/link/TOPICS.md`. Firmware numbers vs twin: `test_firmware` (`link/py/check_numbers.py`, JS mirror of `motion_core.h`, camera geometry).
+- Other map shapes: `twin3d/maps/` (`<name>_site.json` -> `python tools/export_plan.py --arena twin3d/maps/<name>_site.json --out ../maps/plan_<name>.json`), tested by `test_maps`. Supported family: `brain/assert_plan_supported.m`.
+- A full `run_all_tests` (10 tests) takes about 8 to 9 minutes (`test_brain` about 4.5 min: 3 full fills; `test_maps` 8 maps x 400 s sim; `test_link` and `test_run_real` about 80 s each). One MATLAB tool call times out near 60 s: start long jobs with a MATLAB timer or slice them (`opts.maxTime`), save results to a .mat file and poll. A timeout does not mean the run failed. `test_link` compares wall-clock timing: run it with the PC otherwise idle.
+- Last full run (2026-11-22): 9 of 10 passed in 493 s; `test_link` failed once under load and passed 3 of 3 alone. Arena seeds 1/2/3: 125/125/125 piles, every monitor 0. Details: `twin3d/FINAL_REPORT.md`.
 
 ## Hard rules
 - Physics uses the REAL robot numbers in `twin3d/params/twin_params.m` (`P.bot`), the single source of numbers. Do not hard-code a number elsewhere. `P.truck` is visual only.
@@ -35,6 +37,6 @@
 
 ## Open items
 - The L-paddock connector-road fix for the web app is parked in a git stash (`stash@{0}`, "L-paddock connector fix (untested)"). Untested.
-- `docs/Problem_Statement_Optimal_Dump_Packing.pdf` is marked confidential while the GitHub repo is public. Decide before pushing.
-- Nothing from the twin may be committed: at last check `twin3d/` and `tools/export_plan.py` were untracked and `zadp_game.html` modified. Run `git status` to check.
-- Real-robot steps (firmware MQTT, broker, camera calibration, first hardware test) are not done: see "What the user does next" in `twin3d/HANDOVER.md`.
+- Twin, firmware (`firmware/zadp_bot`, FreeRTOS tasks) and the hardware guide (`docs/ZADP_Hardware_Twin_Guide.pdf`) are committed. Web app fixes are a separate commit.
+- Web app open findings (disc collision model, route grid ignores truck length): `twin3d/FINAL_REPORT.md` section 6.
+- Firmware was never built by PlatformIO or run on an ESP32; no broker or camera was used here. First hardware steps: `twin3d/HANDOVER.md` section 14.

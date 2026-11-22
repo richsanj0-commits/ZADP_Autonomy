@@ -1,0 +1,1 @@
+{"name": "Arena hexagon (1:200)", "scale": 0.005, "laneW": 24, "arena": {"w": 1, "h": 1}, "poly": [[40,10],[160,10],[190,90],[165,185],[45,180],[10,85]], "entryEdge": 0, "fleet": [{"name": "Bot hauler", "payload": 500, "count": 3, "L": 20, "W": 16.8}]}

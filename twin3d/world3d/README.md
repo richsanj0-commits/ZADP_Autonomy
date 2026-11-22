@@ -55,7 +55,10 @@ Bed rises during the first 25 % of the dump, stays up, lowers in the last 25 %; 
 
 ## HUD
 Sim time, site time (sim time x 4.8, SCALING.md), trucks dispatched, piles placed / spots, coverage %, collisions
-(robot-robot, robot-pile and off-site events from the safety monitors of the run; 0).
+(robot-robot, robot-pile and off-site events from the safety monitors, `brain_monitor_collisions`; 0). The same
+count everywhere: `world_play` shows the events up to the frame time (each event is logged with its time),
+`world_live` and the Simulink view count them at every brain step. `world_play` and `world_live` stop cleanly when
+the figure is closed; `world_play` closes its video file and hidden figure even when a frame fails.
 
 ## Replay speed
 Rendering is software-limited (hidden figure, 1280 x 720 `getframe`); see the numbers in the phase report. Use a larger

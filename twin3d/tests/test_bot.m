@@ -61,4 +61,58 @@ assert(res.arrived, 'f: demo did not arrive');
 assert(res.inArena, 'f: robot left the arena');
 fprintf('  f. demo: trip %.1f s, final error %.1f mm\n', res.tTrip, 1000*res.finalError);
 
+% g. camera latency: the fix shows the pose of P.cam.latency ago. Straight drive at cruise speed, 300
+%    steady-state steps. Fused uncompensated, the estimate lags by about v*latency (10 mm); with the
+%    odometry compensation in pose_fusion the along-track bias must be under 2 mm.
+rs = RandStream('mt19937ar', 'Seed', 5); bias = zeros(1, 2);
+for comp = [false true]
+    s = bot_init(P, [0.1 0.5 0], 1, rs); nc = 0; e = zeros(0, 1);
+    for k = 1:600
+        s = bot_step(s, [1 1]*P.bot.cruiseSpeed, P, dt);
+        if s.t >= nc - 1e-12
+            [z, tz] = cam_measure(s, P);
+            if comp, s = pose_fusion(s, z, P, tz); else, s = pose_fusion(s, z, P); end
+            nc = nc + 1/P.cam.rateHz;
+        end
+        if k > 300, e(end+1, 1) = s.est(1) - s.pose(1); end %#ok<SAGROW>
+    end
+    bias(comp + 1) = mean(e);
+end
+assert(abs(bias(1)) > 0.5*P.bot.cruiseSpeed*P.cam.latency, 'g: latency not modelled (bias %.2f mm)', 1000*bias(1));
+assert(abs(bias(2)) < 0.002, 'g: compensated along-track bias %.2f mm', 1000*bias(2));
+fprintf('  g. camera latency %.0f ms: along-track bias %.1f mm uncompensated, %.2f mm compensated\n', 1000*P.cam.latency, 1000*bias(1), 1000*bias(2));
+
+% h. wheel travel is dt-independent while accelerating (trapezoidal step): 1 s from rest, no slip
+Pz = P; Pz.bot.slipStd = 0; dist = zeros(1, 3); dts = [0.005 0.01 0.02];
+for q = 1:3
+    s = bot_init(Pz, [0 0 0], 1, rs);
+    for k = 1:round(1/dts(q)), s = bot_step(s, [1 1]*P.bot.cruiseSpeed, Pz, dts(q)); end
+    dist(q) = s.pose(1);
+end
+assert(max(dist) - min(dist) < 1e-4, 'h: distance depends on dt by %.3f mm', 1000*(max(dist) - min(dist)));
+fprintf('  h. 1 s from rest: %.5f / %.5f / %.5f m at dt %s\n', dist, mat2str(dts));
+
+% i. near the target the controller never rotates in place (capture radius) and does not chatter
+%    between drive and rotate; 40 random go-to runs with the camera on, brain step dt
+rs = RandStream('mt19937ar', 'Seed', 7); errs = zeros(1, 40); maxSw = 0; rotNear = 0; dti = 0.02;
+for k = 1:40
+    p0 = [0.3 + 0.4*rand(rs, 1, 2), 2*pi*rand(rs)]; tg = 0.3 + 0.4*rand(rs, 1, 2);
+    s = bot_init(P, p0, 1, rs); nc = 0; rot = false; prev = false; sw = 0; arr = false;
+    for it = 1:round(30/dti)
+        [cmd, arr, rot] = bot_controller(s.est, tg, P, rot);
+        if rot ~= prev, sw = sw + 1; end, prev = rot;
+        if rot && hypot(tg(1) - s.est(1), tg(2) - s.est(2)) < P.ctrl.captureRadius, rotNear = rotNear + 1; end
+        if arr, break, end
+        s = bot_step(s, cmd, P, dti);
+        if s.t >= nc - 1e-12, [z, tz] = cam_measure(s, P); s = pose_fusion(s, z, P, tz); nc = nc + 1/P.cam.rateHz; end
+    end
+    assert(arr, 'i: run %d did not arrive', k);
+    for j = 1:100, if all(abs(s.v) < 1e-4), break, end, s = bot_step(s, [0 0], P, dti); end
+    errs(k) = hypot(tg(1) - s.pose(1), tg(2) - s.pose(2)); maxSw = max(maxSw, sw);
+end
+assert(rotNear == 0, 'i: rotated in place inside the capture radius (%d steps)', rotNear);
+assert(maxSw <= 4, 'i: %d drive/rotate switches in one run', maxSw);
+assert(max(errs) < 0.010, 'i: true arrival error %.2f mm', 1000*max(errs));
+fprintf('  i. 40 random go-tos: true error mean %.2f max %.2f mm, max drive/rotate switches %d\n', 1000*mean(errs), 1000*max(errs), maxSw);
+
 disp('test_bot PASSED');
