@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ZADP Dump Planner</title>
+<link rel="icon" href="data:,">
 <script src="vendor/clipper.js"></script>
 <script>window.ClipperLib || document.write('<script src="https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js"><\/script>')</script>
 <script src="vendor/tesseract/tesseract.min.js"></script>
@@ -223,6 +224,7 @@
         <p class="hint">Human operators place piles closer than their size, so neighbouring piles merge. Overlap packs more: in tests 0 m ≈ 77 %, −1 m ≈ 87 %, −2 m ≈ 94 % of the dump area.</p>
         <div class="row"><label><input type="checkbox" id="showNums" checked> Show fill order numbers</label></div>
         <div class="row"><button id="exportPlan" style="flex:1">Export plan for 3D twin</button></div>
+        <p class="hint">Writes the plan for the 1 m × 1 m twin arena at 1:200, so the site must fit in 200 × 200 m.</p>
       </section>
       <section class="card">
         <h2>Lane (2 one-way lanes)</h2>
@@ -324,6 +326,7 @@ const bounds = p => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for 
 const perim = p => p.reduce((s, a, i) => { const b = p[(i + 1) % p.length]; return s + Math.hypot(b[0] - a[0], b[1] - a[1]); }, 0);
 const edgeLen = (p, i) => { const a = p[i], b = p[(i + 1) % p.length]; return Math.hypot(b[0] - a[0], b[1] - a[1]); };
 const letter = i => i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1);
+const esc = v => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");   // user text (truck / area names) into innerHTML or a value="..." attribute
 const f = (v, d = 2) => (v == null || !isFinite(v)) ? "–" : (+v).toFixed(d);
 function pointInPoly([x, y], p) { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) { const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; }
 
@@ -364,7 +367,7 @@ function progress(p, msg) { $("prog").style.width = (p * 100) + "%"; $("progMsg"
 
 function analyseImage(img, name) {
   if (location.protocol !== "file:") getOcrPool().catch(() => {});   // start loading the text reader while the outline is traced
-  resetRound1();
+  resetRound1(); banner("");   // stale text from an earlier sketch or run must not stay
   const MAX = 900, sc = Math.min(1, MAX / Math.max(img.width, img.height));
   const w = Math.round(img.width * sc), h = Math.round(img.height * sc), N = w * h;
   const oc = document.createElement("canvas"); oc.width = w; oc.height = h;
@@ -1049,7 +1052,7 @@ function renderLib() {
   const lib = store.get("zadp.areas", []);
   $("lib").innerHTML = lib.length ? "" : '<span class="hint">None yet</span>';
   lib.forEach((a, k) => {
-    const d = document.createElement("div"); d.innerHTML = `<span title="${a.name}">${a.name} · ${f(a.area_m2, 0)} m²</span>`;
+    const d = document.createElement("div"); d.innerHTML = `<span title="${esc(a.name)}">${esc(a.name)} · ${f(a.area_m2, 0)} m²</span>`;
     const lo = document.createElement("button"); lo.textContent = "Load"; lo.onclick = () => loadRecord(a);
     const ex = document.createElement("button"); ex.textContent = "⬇"; ex.title = "Export"; ex.onclick = () => download((a.name || "area") + ".json", a);
     const del = document.createElement("button"); del.textContent = "✕"; del.className = "danger";
@@ -1081,6 +1084,8 @@ function newTruck() {
   const n = S.fleet.length + 1;
   return { id: tid++, name: "Truck " + n, payload: null, count: 1, rMode: "calc", rIn: null, mat: 0, L: null, W: null };
 }
+// trucks per type: whole numbers only; 200 starts Round 5 in about 1 s, a million never returns (measured), and 200 is far beyond any real fleet
+const MAX_COUNT = 200;
 // 4 inputs -> everything else is calculated
 function calc(t) {
   const m = MATERIALS[t.mat] || MATERIALS[0], tan = Math.tan(m.rep * Math.PI / 180);
@@ -1089,7 +1094,7 @@ function calc(t) {
   const L = +t.L || 0, W = +t.W || 0, Rt = t.Rt > 0 ? +t.Rt : L ? 1.2 * L : null;   // turning radius: entered, or about 1.2 x length (793F-class: 14 m)
   return { V, r, A: r ? Math.PI * r * r : null, mat: m, tan, Rt,
     mS: W ? W / 2 + 0.16 * W : null, mR: L ? 0.62 * L : null, mF: L ? 0.23 * L : null,     // side = W/2 + 0.16W, rear = 0.62L, front = 0.23L
-    ok: t.payload > 0 && t.count > 0 && r > 0 && L > 0 && W > 0 };
+    ok: t.payload > 0 && Number.isInteger(+t.count) && t.count > 0 && t.count <= MAX_COUNT && r > 0 && L > 0 && W > 0 };
 }
 function shares() {
   const tot = S.fleet.reduce((s, t) => s + (+t.count || 0), 0) || 1;
@@ -1106,7 +1111,7 @@ function render2() {
     const govI = governing();
     fv.innerHTML = `<div class="cards">${S.fleet.map((t, k) => { const c = all[k]; return `
       <div class="tcard ${t.id === S.sel ? "on" : ""}" data-id="${t.id}">
-        <h4>${t.name}</h4><div class="sub">${t.payload ?? "?"} t payload · ${t.count} truck(s) · ${f(sh[k], 0)} % of loads</div>
+        <h4>${esc(t.name)}</h4><div class="sub">${t.payload ?? "?"} t payload · ${t.count} truck(s) · ${f(sh[k], 0)} % of loads</div>
         <canvas width="500" height="260" data-k="${k}"></canvas>
         ${c.ok ? `<div class="stats">
           <div>Pile radius r</div><div><b>${f(c.r)} m</b></div>
@@ -1115,7 +1120,7 @@ function render2() {
         </div>` : '<p class="hint bad">Fill in all 4 inputs</p>'}</div>`; }).join("")}</div>
       <table class="fleet"><thead><tr><th>Truck</th><th>Payload t</th><th>Count</th><th>Share %</th><th>Pile r m</th><th>L × W m</th><th>Turn R m</th><th>Side m</th><th>Rear m</th><th>Front m</th></tr></thead>
       <tbody>${S.fleet.map((t, k) => { const c = all[k]; return `<tr class="${govI && govI.ids.includes(t.id) ? "gov" : ""}">
-        <td>${t.name}</td><td>${t.payload ?? "–"}</td><td>${t.count}</td><td>${f(sh[k], 0)}</td><td>${f(c.r)}</td>
+        <td>${esc(t.name)}</td><td>${t.payload ?? "–"}</td><td>${t.count}</td><td>${f(sh[k], 0)}</td><td>${f(c.r)}</td>
         <td>${t.L ? f(t.L, 1) : "–"} × ${t.W ? f(t.W, 1) : "–"}</td><td>${f(c.Rt, 1)}</td><td>${f(c.mS)}</td><td>${f(c.mR)}</td><td>${f(c.mF)}</td></tr>`; }).join("")}</tbody></table>
       <p class="hint">Highlighted = the truck that sets the largest margins; Round 3 shrinks the area with these. Truck and pile are drawn to the same scale on every card (bar = 5 m).</p>`;
     fv.querySelectorAll(".tcard").forEach(el => el.onclick = () => { S.sel = +el.dataset.id; render2(); });
@@ -1146,16 +1151,16 @@ function drawTruckCard(c, t, k, maxDim) {
 }
 function truckFormHTML(t) {
   const k = calc(t), m = k.mat;
-  const inp = (key, label, unit, step = "0.01") =>
-    `<div class="row"><label>${label}</label><input type="number" data-k="${key}" value="${t[key] ?? ""}" step="${step}" min="0" placeholder="enter"><span class="u">${unit}</span></div>`;
+  const inp = (key, label, unit, step = "0.01", max = "") =>
+    `<div class="row"><label>${label}</label><input type="number" data-k="${key}" value="${t[key] ?? ""}" step="${step}" min="0"${max ? ` max="${max}"` : ""} placeholder="enter"><span class="u">${unit}</span></div>`;
   return `
   <section class="card">
-    <h2>${t.name}</h2>
-    <div class="row"><label>Name</label><input type="text" data-k="name" value="${t.name}" style="width:170px"></div>
+    <h2>${esc(t.name)}</h2>
+    <div class="row"><label>Name</label><input type="text" data-k="name" value="${esc(t.name)}" style="width:170px"></div>
     <h3>1 · Payload</h3>
     ${inp("payload", "Payload", "t", "1")}
     <h3>2 · Number of trucks</h3>
-    ${inp("count", "Trucks of this type", "", "1")}
+    ${inp("count", "Trucks of this type", "", "1", MAX_COUNT)}
     <h3>3 · Pile radius</h3>
     <div class="tabs"><button data-r="calc" class="${t.rMode !== "in" ? "on" : ""}">Calculate</button><button data-r="in" class="${t.rMode === "in" ? "on" : ""}">I know it</button></div>
     ${t.rMode === "in" ? inp("rIn", "Pile radius r", "m") : `
@@ -1173,6 +1178,7 @@ function bindForm(t) {
     const key = el.dataset.k;
     if (key === "name") t.name = el.value.trim() || t.name;
     else if (key === "mat") t.mat = +el.value;
+    else if (key === "count") t.count = el.value === "" ? null : Math.min(MAX_COUNT, Math.max(0, Math.round(+el.value) || 0));   // whole trucks, 0..MAX_COUNT
     else t[key] = el.value === "" ? null : +el.value;
     saveSession(); render2();
   });
@@ -1353,8 +1359,23 @@ function invalidatePlan() {   // shape or entry changed: everything derived from
   stopSim(); SIM = null; $("cmpBox").innerHTML = "";
 }
 const clampGap = (g, r) => Math.max(-r, Math.min(20, +g || 0));   // spacing m: ≥ −r (deeper overlap freezes the grid and hides overlaps), ≤ 20
+// Cheap pre-check before any packing (so a bad fleet cannot freeze the page). Returns a message, or null when fine.
+// Pile-count limit: a hexagonal packing of area A with spacing d holds about A / (0.866 d²) piles. Measured on the valley site: 4200 piles
+// take 0.9 s in Round 4, 13400 take 3.6 s, 33000 take 17 s, and 0.001 t never returns; Round 5 is far slower still. So more than 20000
+// piles for one truck type is refused (the reference sites need 1000 to 5000).
+const MAX_PILES = 20000;
+function fleetProblem() {
+  if (!S.fleet.length || !S.fleet.every(t => calc(t).ok)) return "Complete the fleet in Round 2 first (every truck type needs payload, 1-" + MAX_COUNT + " trucks, length and width)";
+  const A = Math.abs(area(S.poly));
+  for (const t of S.fleet) {
+    const r = calc(t).r, d = 2 * r + clampGap(S.gap[t.id], r), est = A / (0.866 * d * d);
+    if (!(est <= MAX_PILES)) return `Pile radius ${f(r, 2)} m (${t.name}) is too small for this area: about ${isFinite(est) ? Math.round(est) : "endless"} piles would be needed (limit ${MAX_PILES}). Raise the payload or the pile radius in Round 2.`;
+  }
+  return null;
+}
 function run4() {
   if (!S.poly || !S.entry) return;
+  const prob = fleetProblem(); if (prob) { S.r4 = null; banner(prob); draw(); return; }
   computeSafe(); partition(); if (!S.part) { S.r4 = null; banner("No safe zone — area too small for this fleet"); draw(); return; }
   const P = S.part, lane = buildLane(), F = lane.F, a = -S.sweep * Math.PI / 180, inner = S.safe.filter(p => area(p) > 0);
   // zones = bay halves (each bay cut by the spine); each zone gets a branch road through the middle of its bay
@@ -1415,18 +1436,24 @@ function run4() {
       : sumArea(clip(clip(seq.map(s => Array.from({ length: 24 }, (_, k) => [s.p[0] + r * Math.cos(k * Math.PI / 12), s.p[1] + r * Math.sin(k * Math.PI / 12)])), [], CT().ctUnion), [S.poly], CT().ctIntersection));
     grids[t.id] = { r, gap, spots: seq, nZone: nZ, nBranch: nB, nLane: lanePts.length, cov: covA / Math.abs(area(S.poly)) * 100, covSafe: covA / Math.max(1e-9, sumArea(S.safe)) * 100 };
   }
+  const empty = S.fleet.filter(t => !grids[t.id].spots.length);
+  if (empty.length === S.fleet.length) {   // not one pile of any type fits: say why instead of showing 0 piles and 0 % coverage
+    S.r4 = null; banner(`No pile fits this dump area: pile radius ${S.fleet.map(t => f(grids[t.id].r, 1)).join(" / ")} m is too large for the safe zone. Reduce the payload or the pile radius in Round 2, or use a larger area.`); draw(); return;
+  }
   S.r4 = { lane, zones, region, branches, branchSafe, grids, laneSafe, key: planKey() };
   if (S.view4 == null || !S.fleet.some(t => t.id === S.view4)) S.view4 = S.fleet[0].id;
   render4(); draw();
+  if (empty.length) banner(`⚠ No pile of ${empty.map(t => t.name).join(", ")} fits this dump area (pile radius too large) — ` + $("banner").textContent);
 }
 
 // Export for the MATLAB twin: uniform scale into an arena (5 % margin, centred), origin lower-left, y up (world y is already up: W2S flips it for the canvas)
 // With `scale` (arena m per site m) the site is NOT fitted or centred: arena = site * scale, site origin = arena origin
 function exportPlan(arenaW = 2.0, arenaH = 1.5, scale = null) {
+  if (!S.poly || !S.entry || fleetProblem()) { run4(); return null; }   // empty or incomplete fleet: run4 says so in the banner
   if (!S.r4 || S.r4.key !== planKey()) run4();
   const R = S.r4; if (!R) return null;
   const b = bounds(S.poly), fixed = scale != null, k = fixed ? scale : Math.min(0.9 * arenaW / (b[2] - b[0]), 0.9 * arenaH / (b[3] - b[1]));
-  if (fixed && !S.poly.every(q => q[0] * k >= 0 && q[0] * k <= arenaW && q[1] * k >= 0 && q[1] * k <= arenaH)) { banner("Site does not fit the arena at this scale"); return null; }
+  if (fixed && !S.poly.every(q => q[0] * k >= 0 && q[0] * k <= arenaW && q[1] * k >= 0 && q[1] * k <= arenaH)) { banner(`Site does not fit the ${arenaW} x ${arenaH} m arena at 1:${Math.round(1 / k)}: it spans x ${f(b[0], 0)}..${f(b[2], 0)} m, y ${f(b[1], 0)}..${f(b[3], 0)} m, the arena covers 0..${f(arenaW / k, 0)} m x 0..${f(arenaH / k, 0)} m. Use a site of at most that size.`); return null; }
   const cx = fixed ? arenaW / (2 * k) : (b[0] + b[2]) / 2, cy = fixed ? arenaH / (2 * k) : (b[1] + b[3]) / 2, r5 = v => Math.round(v * 1e5) / 1e5;
   const P = q => [r5((q[0] - cx) * k + arenaW / 2), r5((q[1] - cy) * k + arenaH / 2)], PP = p => p.map(P), V = v => [r5(v[0]), r5(v[1])], sc = v => v == null ? null : r5(v * k);
   const F = R.lane.F, id = $("areaName") && $("areaName").value || S.source || "site";
@@ -1491,7 +1518,7 @@ function render4() {
     .map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join("");
   $("gridTable").innerHTML = `<tr><td class="n"></td><td class="u">r m</td><td class="u">spacing m</td><td class="u">piles</td><td class="u">cover %</td></tr>` +
     S.fleet.map(t => { const G = R.grids[t.id]; return `<tr class="${t.id === S.view4 ? "sel" : ""}" data-id="${t.id}" style="cursor:pointer">
-      <td class="n">${t.name}</td><td>${f(G.r)}</td>
+      <td class="n">${esc(t.name)}</td><td>${f(G.r)}</td>
       <td><input type="number" step="0.1" data-id="${t.id}" value="${S.gap[t.id] ?? 0}" min="${f(-G.r, 1)}" style="width:62px"></td>
       <td title="zone + branch + spine">${G.nZone} + ${G.nBranch} + ${G.nLane}</td><td title="of dump area / of safe zone">${f(G.cov, 1)} / ${f(G.covSafe, 1)}</td></tr>`; }).join("") +
     `<tr><td colspan="5" class="u" style="font-size:11px">piles = zone + branch + spine spots · cover = % of dump area / % of safe zone · click a row to view its grid</td></tr>`;
@@ -1500,7 +1527,7 @@ function render4() {
     const id = +el.dataset.id; S.gap[id] = clampGap(el.value, R.grids[id].r); el.value = S.gap[id]; saveSession(); run4(); });
   const G = R.grids[S.view4];
   $("stats4l").innerHTML = `<div>Lane width</div><div>2 × ${f(R.lane.w, 1)} m</div><div>Lane length</div><div>${f(R.lane.depthMax, 1)} m</div>
-    <div>Lane spots (${S.fleet.find(t => t.id === S.view4).name})</div><div>${G.nLane}</div>`;
+    <div>Lane spots (${esc(S.fleet.find(t => t.id === S.view4).name)})</div><div>${G.nLane}</div>`;
   const off = spineOff();
   banner(`${R.zones.length} zone(s) at ${S.sweep}° · ${G.spots.length} piles for ${S.fleet.find(t => t.id === S.view4).name}` +
     (off > 60 ? ` · ⚠ spine runs ${f(off, 0)}° off the entry, trucks may not get in — use Along the entry in Round 3` : ""));
@@ -1586,7 +1613,8 @@ $("bestEntry").onclick = async () => {
   catch (e) { console.error(e); banner("Best entry stopped by an error — see the console"); }
   finally { bestRunning = false; btn.disabled = false; $("demoBtn").disabled = false; }
 };
-$("exportPlan").onclick = () => { const o = exportPlan(); if (!o) return banner("No plan to export"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(o)], { type: "application/json" })); a.download = "plan.json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+// the twin expects a 1 m x 1 m arena at 1:200 (scale 0.005): same call as tools/export_plan.py
+$("exportPlan").onclick = () => { banner(""); const o = exportPlan(1, 1, 0.005); if (!o) return $("banner").textContent || banner("No plan to export"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(o)], { type: "application/json" })); a.download = "plan_" + (String(o.site).replace(/[^\w.-]+/g, "_") || "site") + ".json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
 $("gapHuman").onclick = () => { if (bestRunning) return; S.fleet.forEach(t => S.gap[t.id] = -Math.min(2, calc(t).r)); saveSession(); run4(); };
 $("laneW").onchange = () => { const v = parseFloat($("laneW").value); S.laneW = v > 0 ? v : null; saveSession(); render2(); };
 $("toR4").onclick = () => setRound(4);
@@ -2404,7 +2432,11 @@ function playSim() {
   const loop = now => {
     const real = Math.min(0.1, (now - last) / 1000); last = now;
     acc += real * 60 * simSpeed;                        // 1× = 1 minute of site time per second
-    let n = 0; while (acc >= 1 && n < 4000) { stepSim(SIM, 1); acc -= 1; n++; if (SIM.done) break; }
+    // same steps in the same order as before; only WHEN they run changes: at most ~14 ms of stepping per frame (a big site can take
+    // seconds for 4000 steps and froze the tab), at least one step per frame, the rest stays in acc for the next frame
+    const tf = performance.now(); let n = 0;
+    while (acc >= 1 && n < 4000 && (n === 0 || performance.now() - tf < 14)) { stepSim(SIM, 1); acc -= 1; n++; if (SIM.done) break; }
+    acc = Math.min(acc, 4000);
     if (SIM.done || now - lastUI > 200) { render5(); lastUI = now; }   // side panel at most 5×/s, canvas every frame
     draw();
     if (SIM.done) { stopSim(); return; }
@@ -2422,7 +2454,7 @@ function render5() {
   const hh = Math.floor(W.t / 3600), mm = Math.floor(W.t % 3600 / 60);
   $("stats5").innerHTML = [
     ["Method", METHOD_NAMES[W.method]], ["Site clock", `${hh} h ${String(mm).padStart(2, "0")} min`],
-    ...W.types.map(t => [`<span style="color:${t.color}">●</span> ${t.name}`, `${placed.filter(q => q.ty.id === t.id).length} piles${W.full.has(t.id) ? " · full" : ""}`]),
+    ...W.types.map(t => [`<span style="color:${t.color}">●</span> ${esc(t.name)}`, `${placed.filter(q => q.ty.id === t.id).length} piles${W.full.has(t.id) ? " · full" : ""}`]),
     ["Coverage of dump area", `<b>${f(cov5.v, 1)} %</b>`],
     ...(() => { const B = packingBound(W), ov = W.types.some(t => t.gap < 0), cap = ov ? B.coverable : B.touch, mixed = W.types.length > 1 && W.smallest.r / W.rmax < 0.742;
       return [["Theoretical max", `${f(cap, 1)} % ${ov ? "(overlap: all coverable ground)" : mixed ? "(equal-circle estimate)" : "(touching circles ≤ 90.7 %)"}`], ["Achieved / max", `<b>${f(cov5.v / cap * 100, 0)} %</b> of the best possible`]]; })(),
@@ -2575,7 +2607,7 @@ async function runDemo() {
     S.entry = null; $("buildBtn").click(); if (!S.entry) autoEntry(); $("areaName").value = sm.name;
     caption("Round 1 · Real shape", `The shape is rebuilt <b>to real size in metres</b> from the dimensions: ${f(Math.abs(area(S.poly)) / 4046.86, 0)} acres.`);
     await sleep(3000); $("saveArea").click();
-    caption("Round 2 · Fleet", `Two truck types by <b>payload</b>. Each pile is a 2D circle: radius from the load volume (payload ÷ loose density) as a cone at the angle of repose. ${S.fleet.map(t => `${t.name}: r = ${f(calc(t).r, 2)} m`).join(" · ")}`);
+    caption("Round 2 · Fleet", `Two truck types by <b>payload</b>. Each pile is a 2D circle: radius from the load volume (payload ÷ loose density) as a cone at the angle of repose. ${S.fleet.map(t => `${esc(t.name)}: r = ${f(calc(t).r, 2)} m`).join(" · ")}`);
     await sleep(4000);
     S.sweep = null; setRound(3);
     caption("Round 3 · Step 1 + Step 2", `<b>Minkowski erosion</b> shrinks the area by the largest truck margins: the green safe zone is where a truck's centre may go. Then the <b>Boustrophedon sweep</b> cuts it into cells at every critical point, and big cells into <b>bays</b> sized from the trucks (${f(S.part ? S.part.B : 0, 0)} m): ${S.part ? S.part.cells.length : 0} cells, ${S.part ? S.part.bays.length : 0} bays.`);
@@ -2612,6 +2644,7 @@ function setRound(r) {
   // later rounds always work on the saved shape, with an entry that belongs to it
   if (r >= 2 && S.poly !== S.areaSaved.polygon) { S.poly = S.areaSaved.polygon; S.entry = S.areaSaved.entry; invalidatePlan(); }
   if (r >= 2 && (!S.entry || !(S.entry.i < S.poly.length))) S.entry = S.areaSaved.entry;
+  if (r >= 4) { const prob = fleetProblem(); if (prob) { banner("⚠ " + prob); if (S.round < 3) setRound(3); return; } }
   if (r >= 4) { computeSafe(); if (!S.safe.some(p => area(p) > 0)) { banner("⚠ No safe zone: this area is too small for the fleet. Round 4 and 5 need a bigger area or smaller trucks."); if (S.round < 3) setRound(3); return; } }
   S.round = r;
   document.querySelectorAll(".rounds button[data-round]").forEach(b => {
@@ -2625,7 +2658,7 @@ function setRound(r) {
   $("viewTabs").hidden = !(r === 1 && S.img && S.px);
   setLegend();
   if (r === 2) render2();
-  else { S.mode = "idle"; fitView(); if (r === 3) update3(); else if (r === 4) { computeSafe(); run4(); } else if (r === 5) { computeSafe(); if (!S.r4 || S.r4.key !== planKey()) run4(); $("cmpBox").innerHTML = ""; resetSim(); } else draw(); }
+  else { S.mode = "idle"; fitView(); if (r === 3) update3(); else if (r === 4) { computeSafe(); run4(); } else if (r === 5) { computeSafe(); if (!S.r4 || S.r4.key !== planKey()) run4(); if (!S.r4) return setRound(4); $("cmpBox").innerHTML = ""; resetSim(); } else draw(); }
   if (r !== 5 && typeof stopSim === "function") stopSim();
 }
 document.querySelectorAll(".rounds button[data-round]").forEach(b => b.onclick = () => setRound(+b.dataset.round));
@@ -2636,9 +2669,23 @@ function saveSession() {
 }
 function loadSession() {
   const d = store.get("zadp.session", null); if (!d) return;
+  try { loadSessionData(d); }
+  catch (e) {   // damaged or older-format session: start clean instead of a half-initialised page
+    try { localStorage.removeItem("zadp.session"); } catch (e2) {}
+    S.fleet = []; S.sel = null; S.areaSaved = null; S.poly = null; S.entry = null; S.sweep = null; S.laneW = null; S.gap = {}; S.rows = undefined;
+    try { resetRound1(); } catch (e2) {}
+    banner("The saved session could not be read and was cleared. Starting clean.");
+  }
+}
+function loadSessionData(d) {
+  if (typeof d !== "object" || Array.isArray(d)) throw new Error("session is not an object");
+  if (d.fleet != null && !Array.isArray(d.fleet)) throw new Error("fleet is not a list");
+  if (d.area && d.area.polygon && !(Array.isArray(d.area.polygon) && d.area.polygon.length >= 3 && d.area.polygon.every(q => Array.isArray(q) && isFinite(q[0]) && isFinite(q[1])) &&
+      d.area.entry && Number.isInteger(d.area.entry.i) && d.area.entry.i >= 0 && d.area.entry.i < d.area.polygon.length && Array.isArray(d.area.entry.pt))) throw new Error("area is not valid");
+  if (d.fleet) d.fleet = d.fleet.filter(t => t && typeof t === "object").map((t, i) => Object.assign(t, { id: Number.isFinite(+t.id) ? +t.id : i + 1, name: String(t.name ?? "Truck " + (i + 1)) }));
   if (d.fleet) { S.fleet = d.fleet; tid = Math.max(0, ...S.fleet.map(t => t.id)) + 1; S.sel = d.sel; }
   if (d.arrivals) S.arrivals = d.arrivals;
-  if (d.laneW) S.laneW = d.laneW; if (d.gap) S.gap = d.gap; if (d.rows) S.rows = d.rows;
+  if (d.laneW) S.laneW = d.laneW; if (d.gap && typeof d.gap === "object") S.gap = d.gap; if (d.rows) S.rows = d.rows;
   if (d.area && d.area.polygon) {
     loadRecord(d.area);                                              // resets the plan and the sweep
     if (d.entry && d.entry.pt && d.entry.i < S.poly.length) { S.entry = d.entry; if (d.sweep != null) S.sweep = d.sweep; }   // sweep only with its own entry
@@ -2648,7 +2695,7 @@ function setLegend() {
   const sw = (c, t) => `<span><i class="sw" style="background:${c}"></i>${t}</span>`;
   $("legend").style.display = S.round === 2 ? "none" : "flex";
   $("legend").innerHTML = S.round === 5
-    ? (SIM ? SIM.types.map(t => sw(t.color, t.name + " piles")).join("") : "") + Object.values(ZSTAT).map(([c, n]) => sw(c, n)).join("") + '<span>dashed circle = reserved spot</span>'
+    ? (SIM ? SIM.types.map(t => sw(t.color, esc(t.name) + " piles")).join("") : "") + Object.values(ZSTAT).map(([c, n]) => sw(c, n)).join("") + '<span>dashed circle = reserved spot</span>'
     : S.round === 4
     ? sw("var(--area)", "Dump area") + sw("#3fb68b", "Safe zone") + sw("rgba(245,166,35,.6)", "Lane (fills last)") + sw("#c9a46b", "Pile circle") + sw("var(--accent)", "Entry")
     : S.round === 3

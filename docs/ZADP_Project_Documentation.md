@@ -309,11 +309,11 @@ A simulation number like "77 %" is only convincing next to the **best that is ma
 
 **1. The upper bound — no method can beat it.**
 - A pile centre may only be in the safe zone (Step 1), so piles can only ever cover the *coverable ground* C = (safe zone grown by the pile radius) ∩ dump area.
-- Equal circles that only touch can cover at most **π / (2√3) = 90.69 %** of any region (Thue's theorem, proved by Fejes Tóth, 1940s). This is a proof, not a simulation.
+- Equal circles that only touch can cover at most **π / (2√3) = 90.69 %** of a large region (Thue's theorem, proved by Fejes Tóth, 1940s; near the edges of a small or non-convex region the bound is not strict). This is a proof, not a simulation.
 - So for touching piles: **max coverage = 0.9069 × C / dump area.** With overlapping piles the cap is C / dump area.
 - With a mixed fleet the tool grows the safe zone by the *largest* pile radius (the biggest piles reach furthest past it), so C is never underestimated. Strictly, circles of two very different sizes can pack slightly denser than 90.69 % (Blind, 1969), so for such fleets the figure is labelled an *equal-circle estimate* rather than a hard cap.
 
-For the 50-acre valley fill: C = 97.6 % of the area, so the touching bound is **88.5 %**. ZADP reaches **76.9 %**, which is **87 % of the theoretical maximum**.
+For the 50-acre valley fill (entry on edge 12, the section 9 fleet, seed 7, re-measured with the tool): C = 99.6 % of the area, so the touching bound is **90.3 %**. ZADP reaches **76.9 %**, which is **85 % of the theoretical maximum**.
 
 **2. Why the remaining gap is not a weakness of the method.** The bound assumes an infinite plane. Real areas have edges, curved boundaries and roads, where circles cannot pack perfectly. As a *reachable* reference, Round 4 lays the ideal hexagonal lattice of the smallest truck over the same zones with no traffic at all: about 76 %. The live mixed-fleet dispatcher, with all safety rules, reaches **76.9 %**, matching the ideal static plan.
 
@@ -323,7 +323,7 @@ For the 50-acre valley fill: C = 97.6 % of the area, so the touching bound is **
 
 **5. It is repeatable.** The same area with different truck arrival orders (random seeds) gives results within about ±3 points, and every run records 0 collisions and 0 deadlocks.
 
-**Answer to "why 66 % and not 79 % or 55 %?":** the figure is boxed in from both sides. It cannot exceed the proven geometric cap (88.5 % on this site), and it equals the ideal static hexagonal plan (~76 %) while leaving practically no reachable space unused. Any other method can be scored against the same cap with the same tool.
+**Answer to "why 66 % and not 79 % or 55 %?":** the figure is boxed in from both sides. It cannot exceed the proven geometric cap (90.3 % on this site), and it equals the ideal static hexagonal plan (~76 %) while leaving practically no reachable space unused. Any other method can be scored against the same cap with the same tool.
 
 ---
 
