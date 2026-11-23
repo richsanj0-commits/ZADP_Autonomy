@@ -15,6 +15,12 @@ void motorsOff();
 // encodersRead() is called only by the control task after setup() (the PCNT unwrap state is not shared).
 void encodersBegin();
 void encodersRead(int32_t& left, int32_t& right);
-const char* encoderBackend();          // "pcnt" or "gpio-isr" (serial banner)
+const char* encoderBackend();
+
+// Optional yaw-rate gyro (USE_GYRO). gyroBegin() in setup() with the robot still; gyroRate() only from the
+// control task. Both return false when there is no gyro: heading then comes from the encoders.
+bool gyroBegin();
+bool gyroOk();
+bool gyroRate(float& radPerS);          // "pcnt" or "gpio-isr" (serial banner)
 
 }  // namespace hw

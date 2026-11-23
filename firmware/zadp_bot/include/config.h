@@ -117,8 +117,11 @@
 #define PWM_FREQ_HZ      5000        // [ref] 5 kHz
 #define PWM_BITS         8           // [ref] 8-bit
 #define PWM_MAX          255         // full scale of PWM_BITS
-#define PWM_DEADBAND     20.0f       // CALIBRATE: smallest PWM that starts a wheel turning (bench: 'l 15', 'l 20', ...)
-#define PWM_PER_MPS      ((PWM_MAX - PWM_DEADBAND) / MAX_WHEEL_SPEED)  // feed-forward slope, CALIBRATE
+// Measured on this robot (micromouse motor characterization, wheels in the air, 2026-10-28):
+//   PWM = 4 + counts_per_s / 60, linear up to PWM 150, both motors within 2 %; PWM 15 always starts a wheel.
+//   60 counts/s per PWM = 432.6 PWM per m/s (25954 counts per m). On the floor the wheel PI adds the load.
+#define PWM_DEADBAND     15.0f       // [ref] smallest PWM that always starts a wheel
+#define PWM_PER_MPS      432.6f      // [ref] feed-forward slope, PWM per m/s
 #define WHEEL_KP         600.0f      // PWM per m/s of speed error
 #define WHEEL_KI         7500.0f     // PWM per m of accumulated error (Kp/Ki = 0.08 s = motor time constant)
 #define WHEEL_KD         0.0f        // PWM per m/s^2; off (encoder speed is too coarse to differentiate)
@@ -177,6 +180,27 @@
                                         // (bench exempt)
 #define BOOT_STACK_REPORT_MS 3000    // print the stack high-water marks once this long after boot (console task)
 #define RAW_MAX_S           10.0f    // bench raw PWM test ('l', 'r', 'b'): longest allowed duration, s
+
+// ---------------------------------------------------------------- gyro [fw]
+// Optional MPU6050 yaw gyro: the heading step between camera fixes comes from the gyro instead of the wheel
+// difference (encoder-only turns slip on this robot: 79-95 deg for the same counts). Robot 1 has one.
+// Not modelled in the twin: it only makes the real heading better than the twin's odometry model.
+#ifndef USE_GYRO
+#define USE_GYRO            (BOT_ID == 1)
+#endif
+#define PIN_I2C_SDA         21       // [ref]
+#define PIN_I2C_SCL         22       // [ref]
+#define GYRO_ADDR           0x68     // [ref] MPU6050
+#define GYRO_LSB_PER_DPS    65.5f    // [ref] +-500 deg/s range
+#define GYRO_BIAS_SAMPLES   400      // [ref] readings averaged at boot, 2 ms apart, robot still
+#define GYRO_I2C_TIMEOUT_MS 20       // I2C timeout of one read (gyro task only; the control task never waits on it)
+#define GYRO_MAX_FAILS      100      // failed reads in a row before the gyro is switched off (0.5 s)
+#define GYRO_PERIOD_MS      5        // gyro task period (= control period)
+#define GYRO_STALE_MS       20       // a reading older than this is not used (heading falls back to the encoders)
+#define GYRO_TASK_CORE      1
+#define GYRO_TASK_PRIO      10       // below control (20), above console
+#define GYRO_TASK_STACK     3072
+#define PIN_TOF_XSHUT_LIST  23, 19, 18, 17, 16   // [ref] the 5 unused ToF sensors: held low = shutdown, off the bus
 
 // ---------------------------------------------------------------- encoders [fw]
 // 1 = ESP32 PCNT hardware counters (x4 quadrature, glitch filter, no CPU load per edge); 0 = GPIO interrupts

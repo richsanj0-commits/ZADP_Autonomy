@@ -72,7 +72,9 @@ void controlTask(void*) {
 
         // ---- control
         hw::encodersRead(l, r);
-        truck.step(now, l, r);
+        float gz = 0.f;
+        const bool gyro = hw::gyroRate(gz);                      // bounded I2C read (GYRO_I2C_TIMEOUT_MS); false = encoders
+        truck.step(now, l, r, gyro, gz);
 
         // rule: MQTT down longer than LINK_LOSS_STOP_S = motors off, unless a bench command / raw test runs.
         // (The 300 ms command watchdog inside Truck already stops a drive or turn; this also covers braking

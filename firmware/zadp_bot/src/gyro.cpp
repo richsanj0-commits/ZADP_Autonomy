@@ -1,0 +1,128 @@
+// gyro.cpp : optional MPU6050 yaw-rate gyro (USE_GYRO, robot 1). Same register setup as the micromouse firmware
+// that was verified on this robot (D:\micromouse-Esp-build, initGyro / readGyroRaw): 0x68, +-500 deg/s, 44 Hz
+// low-pass, the axis that feels gravity is the yaw axis.
+// gyroBegin() runs in setup() with the robot still (bias = mean of GYRO_BIAS_SAMPLES readings), then starts the
+// gyro task. rule: the control task never touches I2C. The gyro task reads the rate every GYRO_PERIOD_MS and
+// publishes it through atomics; gyroRate() only copies it and rejects a value older than GYRO_STALE_MS.
+// The 5 ToF sensors on the same bus are held in shutdown (XSHUT low) so they cannot disturb it.
+#include <Arduino.h>
+
+#include "config.h"
+#include "hw.h"
+
+#if USE_GYRO
+#include <Wire.h>
+#include <atomic>
+#include <esp_timer.h>
+
+namespace hw {
+
+static bool ok = false;
+static uint8_t axis = 2;        // axis pointing up, found from gravity
+static float ccwSign = 1.f;     // +1 when that axis points up: raw + = counter-clockwise = heading +
+static float bias = 0.f;        // raw reading when still
+static std::atomic<bool> live{false};      // task running and readings valid
+static std::atomic<float> rateRad{0.f};    // last yaw rate, rad/s, counter-clockwise +
+static std::atomic<uint32_t> stampMs{0};   // when it was read
+static const uint8_t TOF_XSHUT[] = {PIN_TOF_XSHUT_LIST};
+
+static void wr(uint8_t reg, uint8_t val) {
+    Wire.beginTransmission(GYRO_ADDR);
+    Wire.write(reg);
+    Wire.write(val);
+    Wire.endTransmission();
+}
+
+static bool rd(uint8_t reg, uint8_t* buf, uint8_t n) {
+    Wire.beginTransmission(GYRO_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) return false;
+    if (Wire.requestFrom((int)GYRO_ADDR, (int)n) != n) return false;
+    for (uint8_t i = 0; i < n; i++) buf[i] = Wire.read();
+    return true;
+}
+
+static bool raw(float& v) {
+    uint8_t b[2];
+    if (!rd(0x43 + 2 * axis, b, 2)) return false;
+    v = (float)(int16_t)((b[0] << 8) | b[1]);
+    return true;
+}
+
+static void gyroTask(void*) {
+    TickType_t last = xTaskGetTickCount();
+    uint16_t fails = 0;
+    for (;;) {
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(GYRO_PERIOD_MS));
+        float v;
+        if (raw(v)) {
+            fails = 0;
+            rateRad.store(ccwSign * (v - bias) / GYRO_LSB_PER_DPS * 0.01745329252f);
+            stampMs.store((uint32_t)(esp_timer_get_time() / 1000));
+        } else if (++fails >= GYRO_MAX_FAILS) {                  // rule: a dead bus switches the gyro off for good
+            live.store(false);
+            vTaskDelete(nullptr);
+        }
+    }
+}
+
+bool gyroBegin() {
+    for (uint8_t p : TOF_XSHUT) {                                // rule: unused ToF sensors stay in shutdown
+        pinMode(p, OUTPUT_OPEN_DRAIN);
+        digitalWrite(p, LOW);
+    }
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    Wire.setClock(400000);
+    Wire.setTimeOut(GYRO_I2C_TIMEOUT_MS);
+    wr(0x6B, 0x00);             // wake up
+    delay(100);
+    wr(0x1A, 0x03);             // low-pass about 44 Hz
+    wr(0x1B, 0x08);             // +-500 deg/s
+    uint8_t a[6];
+    if (!rd(0x3B, a, 6)) return false;              // no gyro: heading stays on the encoders
+    int16_t acc[3];
+    for (int i = 0; i < 3; i++) acc[i] = (int16_t)((a[2 * i] << 8) | a[2 * i + 1]);
+    axis = 0;
+    for (int i = 1; i < 3; i++)
+        if (abs(acc[i]) > abs(acc[axis])) axis = i;
+    ccwSign = acc[axis] > 0 ? 1.f : -1.f;
+    float sum = 0.f;
+    int n = 0;
+    for (int i = 0; i < GYRO_BIAS_SAMPLES; i++) {   // rule: the robot must be still at power-up
+        float v;
+        if (raw(v)) { sum += v; ++n; }
+        delay(2);
+    }
+    if (n < GYRO_BIAS_SAMPLES / 2) return false;
+    bias = sum / n;
+    ok = true;
+    live.store(true);
+    if (xTaskCreatePinnedToCore(gyroTask, "zadp_gyro", GYRO_TASK_STACK, nullptr, GYRO_TASK_PRIO, nullptr, GYRO_TASK_CORE) != pdPASS) {
+        live.store(false);
+        return false;
+    }
+    return true;
+}
+
+bool gyroOk() { return live.load(); }
+
+// yaw rate in rad/s, counter-clockwise positive. false = no valid reading (caller uses the encoders).
+bool gyroRate(float& radPerS) {
+    if (!live.load()) return false;
+    const uint32_t age = (uint32_t)(esp_timer_get_time() / 1000) - stampMs.load();
+    if (age > GYRO_STALE_MS) return false;                       // rule: an old reading is not used
+    radPerS = rateRad.load();
+    return true;
+}
+
+}  // namespace hw
+
+#else
+
+namespace hw {
+bool gyroBegin() { return false; }
+bool gyroOk() { return false; }
+bool gyroRate(float&) { return false; }
+}  // namespace hw
+
+#endif

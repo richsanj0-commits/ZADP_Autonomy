@@ -90,6 +90,8 @@ void setup() {
     digitalWrite(PIN_LED, LOW);
     Serial.begin(SERIAL_BAUD);
     hw::encodersBegin();
+    const bool gyro = hw::gyroBegin();                           // 0.9 s, robot still (bias); false = encoders only
+    Serial.printf("gyro: %s\n", gyro ? "ok (heading rate from the gyro)" : "off (heading from the encoders)");
 
     ctrlQ = xQueueCreate(CMD_QUEUE_LEN, sizeof(CtrlMsg));
     camQ = xQueueCreate(CAM_QUEUE_LEN, sizeof(CamMsg));

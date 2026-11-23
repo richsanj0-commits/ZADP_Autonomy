@@ -82,9 +82,13 @@ inline Pose arcStep(const Pose& p, float ds, float dth) {
 }
 
 // dead reckoning from encoder count deltas (bot_odometry.m; per-wheel CPR, heading kept wrapped)
-inline Pose odometry(const Pose& p, int32_t dL, int32_t dR, const Params& P) {
+// useGyro: the heading step comes from the gyro (gyroDth, rad) instead of the wheel difference, which slips in
+// turns. rule: wheels still (no counts) = no heading change, so gyro bias never drifts a parked robot.
+inline Pose odometry(const Pose& p, int32_t dL, int32_t dR, const Params& P, bool useGyro = false, float gyroDth = 0.f) {
     float sl = dL * P.mPerCountL(), sr = dR * P.mPerCountR();
-    Pose q = arcStep(p, 0.5f * (sl + sr), (sr - sl) / P.track);
+    float dth = (sr - sl) / P.track;
+    if (useGyro) dth = (dL == 0 && dR == 0) ? 0.f : gyroDth;
+    Pose q = arcStep(p, 0.5f * (sl + sr), dth);
     q.th = wrapAngle(q.th);
     return q;
 }
@@ -306,11 +310,13 @@ public:
     void setPose(const Pose& p) { est_ = p; camInit_ = true; }
 
     // One control tick at time `now` (s) with the cumulative encoder counts.
-    void step(double now, int32_t encL, int32_t encR) {
+    // gyroValid / gyroRate (rad/s, counter-clockwise +): optional yaw-rate gyro for the heading step.
+    void step(double now, int32_t encL, int32_t encR, bool gyroValid = false, float gyroRate = 0.f) {
         const float dt = P.dt;
         int32_t dL = encL - lastEncL_, dR = encR - lastEncR_;
-        est_ = odometry(est_, dL, dR, P);                        // est follows the encoders between fixes
-        odom_ = odometry(odom_, dL, dR, P);                      // odom: encoders only (latency compensation)
+        const float gdth = gyroRate * dt;
+        est_ = odometry(est_, dL, dR, P, gyroValid, gdth);       // est follows dead reckoning between fixes
+        odom_ = odometry(odom_, dL, dR, P, gyroValid, gdth);     // odom: dead reckoning only (latency compensation)
         lastEncL_ = encL; lastEncR_ = encR;
         pushHistory(now, odom_);
         vL_ = spdL_.update(encL, P.mPerCountL(), P.velWindow, dt);
