@@ -21,6 +21,7 @@ const char* encoderBackend();
 // control task. Both return false when there is no gyro: heading then comes from the encoders.
 bool gyroBegin();
 bool gyroOk();
-bool gyroRate(float& radPerS);          // "pcnt" or "gpio-isr" (serial banner)
+bool gyroRate(float& radPerS);
+void gyroCheckSign(float encRate);     // control task, every tick: yaw rate from the encoders, rad/s          // "pcnt" or "gpio-isr" (serial banner)
 
 }  // namespace hw

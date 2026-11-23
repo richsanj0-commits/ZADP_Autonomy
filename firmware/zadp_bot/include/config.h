@@ -195,6 +195,8 @@
 #define GYRO_BIAS_SAMPLES   400      // [ref] readings averaged at boot, 2 ms apart, robot still
 #define GYRO_I2C_TIMEOUT_MS 20       // I2C timeout of one read (gyro task only; the control task never waits on it)
 #define GYRO_MAX_FAILS      100      // failed reads in a row before the gyro is switched off (0.5 s)
+#define GYRO_SIGN_MIN_RATE  1.0f     // rad/s from the encoders: above this the turn direction is certain
+#define GYRO_SIGN_SAMPLES   20       // ticks of such turning before the gyro sign is judged (0.1 s)
 #define GYRO_PERIOD_MS      5        // gyro task period (= control period)
 #define GYRO_STALE_MS       20       // a reading older than this is not used (heading falls back to the encoders)
 #define GYRO_TASK_CORE      1

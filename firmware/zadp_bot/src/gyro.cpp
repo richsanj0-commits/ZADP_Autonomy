@@ -19,7 +19,8 @@ namespace hw {
 
 static bool ok = false;
 static uint8_t axis = 2;        // axis pointing up, found from gravity
-static float ccwSign = 1.f;     // +1 when that axis points up: raw + = counter-clockwise = heading +
+static std::atomic<float> ccwSign{1.f};   // +1: raw + = counter-clockwise = heading +. From gravity at boot, then
+                                          // checked against the encoders while turning (gyroCheckSign)
 static float bias = 0.f;        // raw reading when still
 static std::atomic<bool> live{false};      // task running and readings valid
 static std::atomic<float> rateRad{0.f};    // last yaw rate, rad/s, counter-clockwise +
@@ -57,7 +58,7 @@ static void gyroTask(void*) {
         float v;
         if (raw(v)) {
             fails = 0;
-            rateRad.store(ccwSign * (v - bias) / GYRO_LSB_PER_DPS * 0.01745329252f);
+            rateRad.store(ccwSign.load() * (v - bias) / GYRO_LSB_PER_DPS * 0.01745329252f);
             stampMs.store((uint32_t)(esp_timer_get_time() / 1000));
         } else if (++fails >= GYRO_MAX_FAILS) {                  // rule: a dead bus switches the gyro off for good
             live.store(false);
@@ -85,7 +86,7 @@ bool gyroBegin() {
     axis = 0;
     for (int i = 1; i < 3; i++)
         if (abs(acc[i]) > abs(acc[axis])) axis = i;
-    ccwSign = acc[axis] > 0 ? 1.f : -1.f;
+    ccwSign.store(acc[axis] > 0 ? 1.f : -1.f);
     float sum = 0.f;
     int n = 0;
     for (int i = 0; i < GYRO_BIAS_SAMPLES; i++) {   // rule: the robot must be still at power-up
@@ -106,6 +107,22 @@ bool gyroBegin() {
 
 bool gyroOk() { return live.load(); }
 
+// rule (as in the micromouse firmware): the mounting sign is checked against the encoders. The wheels may slip,
+// but they never report a turn in the opposite direction. Called by the control task every tick with the yaw
+// rate from the encoders; after GYRO_SIGN_SAMPLES ticks of clear turning the gyro sign is flipped if it disagrees.
+void gyroCheckSign(float encRate) {
+    static float sum = 0.f;
+    static uint16_t n = 0;
+    if (!live.load() || fabsf(encRate) < GYRO_SIGN_MIN_RATE) return;
+    sum += rateRad.load() * encRate;
+    if (++n < GYRO_SIGN_SAMPLES) return;
+    if (sum < 0.f) {
+        ccwSign.store(-ccwSign.load());
+        rateRad.store(-rateRad.load());
+    }
+    sum = 0.f; n = 0;
+}
+
 // yaw rate in rad/s, counter-clockwise positive. false = no valid reading (caller uses the encoders).
 bool gyroRate(float& radPerS) {
     if (!live.load()) return false;
@@ -123,6 +140,7 @@ namespace hw {
 bool gyroBegin() { return false; }
 bool gyroOk() { return false; }
 bool gyroRate(float&) { return false; }
+void gyroCheckSign(float) {}
 }  // namespace hw
 
 #endif

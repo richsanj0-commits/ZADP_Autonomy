@@ -31,6 +31,7 @@ void controlTask(void*) {
     hw::encodersRead(l, r);
     truck.begin(zadp::makePose(INIT_X, INIT_Y, INIT_HEADING), l, r, esp_timer_get_time() * 1e-6);
 
+    int32_t prevL = l, prevR = r;
     Snapshot s;
     uint32_t ticks = 0, overruns = 0, execMaxUs = 0, camAcc = 0, camRej = 0, cmdNew = 0, cmdRep = 0;
     uint32_t linkDown = 0;
@@ -72,6 +73,10 @@ void controlTask(void*) {
 
         // ---- control
         hw::encodersRead(l, r);
+        const float encRate = ((r - prevR) * (3.14159265f * WHEEL_DIAMETER_M / CPR_RIGHT) - (l - prevL) * (3.14159265f * WHEEL_DIAMETER_M / CPR_LEFT))
+                              / (TRACK_M * TRACK_SCALE) * CONTROL_HZ;
+        prevL = l; prevR = r;
+        hw::gyroCheckSign(encRate);                              // rule: gyro sign follows the encoders' turn direction
         float gz = 0.f;
         const bool gyro = hw::gyroRate(gz);                      // bounded I2C read (GYRO_I2C_TIMEOUT_MS); false = encoders
         truck.step(now, l, r, gyro, gz);
