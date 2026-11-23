@@ -4,6 +4,7 @@
 //   control   core 1, CTRL_TASK_PRIO, CONTROL_HZ (vTaskDelayUntil): encoders, zadp::Truck, motors, watchdogs
 //   comms     core 0: WiFi + MQTT state machine, JSON parsing -> ctrlQ / camQ
 //   telemetry core 0: TELEMETRY_HZ + at once on a new seq (notified by control) -> MQTT
+//   gyro      core 1, GYRO_TASK_PRIO: MPU6050 rate -> atomics (only if a gyro was found; started in gyro.cpp)
 //   console   core 1, low priority: serial bench self-test
 //   health    core 1, lowest: status LED
 // Data flow (no unprotected shared globals):
@@ -69,6 +70,10 @@ extern TaskInfo tasks[T_COUNT];
 extern std::atomic<uint32_t> rxCmd, rxCam, badJson, ctrlDrops, telSent, telSkipped, mqttConnects;
 // comms task heartbeat (millis() at the top of each pass): the control task treats a stuck comms task as link loss
 extern std::atomic<uint32_t> commsAliveMs;
+
+// ---------------------------------------------------------------- boot diagnosis (main.cpp)
+const char* fwBuild();                                          // build date and time of main.cpp
+const char* resetReasonText();                                 // esp_reset_reason() of this boot as text
 
 // ---------------------------------------------------------------- helpers
 // rule: posting never blocks the caller (a full queue drops the message and counts it)

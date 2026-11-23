@@ -200,16 +200,15 @@ Last run: ALL TESTS PASSED in 445.1 s; `test_brain` 249 s, `test_maps` 76 s (8 m
 - Every monitor zero in all of these runs: robot-robot, robot-pile, off-site, section ownership, deadlocks. The 300 s test run numbered 15 trucks.
 - 3D: replay 8.2 frames/s (1280 x 720, hidden); `demo_3d.mp4` 30.0 s, 901 frames, 11.4 MB (limit 15 MB). Simulink 30 s: 2 piles, coverage 0.9184 %, identical to `brain_run` 30 s (own random stream).
 - Link (loopback, fake robots): demo 120 s, 115 commands, 115 of 115 acknowledged, twin-vs-real position error mean 5.2 mm, worst 24.8 mm, worst heading error 11.6 deg, command round trip mean 12.9 ms (worst 24.7), twin violations 0. 20 s syncToReal run: worst error 23.7 mm.
-- No broker was present (paho-mqtt 2.1.0 installed, no mosquitto): the MQTT broker path was never exercised here.
+- Broker path (2026-11-23): robot 1 was verified on the floor over WiFi/MQTT through `mini_broker.py` (see section 13). The twin runs above used loopback.
 
 ## 13. Known limits
 - Inner-row branch spots (41, 100) sit in a pocket that the zone's last row closes (channel 0.057 m < truck 0.084 m). They are now filled first (Rule 1b over branch-after-zone); a plan with a different pocket could still lose a spot, reported, not hidden.
 - The apron is cramped: margins at the return-row corner (7.5 mm to the apron top), the queue band (9.75 mm) and the P3 turn (4 mm planned to the apron bottom) are only a few mm more than the tracking error. Stops are centred on their end point (predicted coast) and drives follow the leg line; keep that in the firmware.
 - Odometry alone (camera off) drifts much faster than the 1 % slip suggests, because the left/right scale difference integrates into heading: about 1.7 % / 1.7 deg over 0.2 m, 6 % / 6 deg over 1 m, 13 % / 13 deg over 4 m (150 runs). The camera fix (gain 0.3) is what keeps arrival errors small.
 - Camera latency (50 ms) is modelled (`cam_measure` returns the pose of 50 ms ago) and compensated in `pose_fusion` with the odometry since the image time; uncompensated, the estimate would lag about 10 mm at cruise, more than the 7 mm pile clearance. The firmware must do the same (`link/TOPICS.md` checklist). `fake_bot.py` does the same.
-- `aruco_node.py` is written but NEVER run against a camera; expect to tune it (no undistortion; the apron outside the four corner markers is extrapolated).
-- The FreeRTOS firmware (`firmware/zadp_bot`) has never been built by PlatformIO (only syntax-checked with the xtensa
-  compiler against the arduino-esp32 2.0.17 headers, libraries stubbed) and has never run on an ESP32, and the broker path of `bridge.py` / `aruco_node.py` was never connected to a real broker or camera here (no broker, no OpenCV on this PC); `run_real('dry')` tests the same code path with loopback, fake robots and a simulated camera.
+- `aruco_node.py` is written but has not been run against a camera (OpenCV is not installed); expect to tune it (no undistortion; the apron outside the four corner markers is extrapolated).
+- Firmware (`firmware/zadp_bot`), as of 2026-11-23: all 5 envs build with PlatformIO. Robot 1 is flashed and was verified on the floor over WiFi/MQTT through `mini_broker.py`: straight 0.2 m (+5161 / +5171 counts, arrived); left and right 90 degree turns (gyro heading +87.4 / -87.4 deg, arrived in 1.5 s); telemetry 19.3 Hz. Not yet verified: robots 2 and 3, a real camera and `aruco_node.py` (OpenCV not installed), `run_real('real')` end to end. `run_real('dry')` tests the same code path with loopback, fake robots and a simulated camera.
 - A fixed parking bay per robot is NOT implemented: a rolling queue P3 -> P2 -> P1 is used (a fixed bay would need a wider apron and breaks the all-or-nothing section grants).
 - Lane (spine) spots are filled last, one truck at a time, deepest first; the others wait parked.
 - Three robots stand for an endless stream of trucks; truck numbers are labels, not separate robots.
@@ -218,35 +217,39 @@ Last run: ALL TESTS PASSED in 445.1 s; `test_brain` 249 s, `test_maps` 76 s (8 m
 - Memory: do not start a second MATLAB or the Unreal viewer on the 16 GB PC.
 
 ## 14. What the user does next (real robots)
-Everything below runs on the PC that runs MATLAB unless said otherwise. Nothing is installed by the repository.
+Everything below runs on the PC that runs MATLAB. Nothing is installed by the repository. No Mosquitto is needed.
 
-1. **Broker** (Windows, Mosquitto 2.x): run the Windows installer from mosquitto.org/download, create
-   `C:\mosquitto\zadp.conf` with
-   ```
-   listener 1883 0.0.0.0
-   allow_anonymous true
-   ```
-   (closed test network only; Mosquitto 2 without a listener line accepts only localhost), allow inbound TCP 1883 in
-   the Windows firewall, stop the installed service if it runs (`net stop mosquitto`, admin shell) and start
-   `"C:\Program Files\mosquitto\mosquitto.exe" -v -c C:\mosquitto\zadp.conf`.
-   Set `P.mqtt.broker` in `params\twin_params.m` to this PC's LAN address (or `'localhost'` when MATLAB runs on it).
-2. **Python** (yourself): `pip install paho-mqtt numpy opencv-contrib-python pillow`.
-3. **Flash** (per robot N = 1..3): `firmware\zadp_bot\include\secrets.h` from `secrets.example.h` (WiFi, `MQTT_HOST` = the
-   broker address), `pio run -e botN -t upload` (`botN_pcb` for BIN2 on GPIO 5; `bot1_isr` = GPIO-interrupt encoders
-   if PCNT misbehaves; the first build needs internet once to fetch PubSubClient 2.8 and ArduinoJson 7.2.1), then
-   `pio device monitor -e botN`: boot banner, task stack report after 3 s (no `LOW` line), then the bench self-test
-   (`firmware\README.md` section 3; `w` = task stacks, `i` = status with overruns and exec time). If you calibrate `TRACK_SCALE`, write the same value into `P.bot.trackScale`; `test_firmware` checks it.
-4. **Markers**: in MATLAB `link_write_config(twin_params())`, then `python link\markers\make_markers.py`; print
-   `robots_A4.pdf` and `corners_A4.pdf` at 100 %, check the 50 mm bar. Robot marker id N on robot N, centred on the top,
-   arrow to the nose. Corners 10-13 at `P.cam.cornerXY` (`placement.txt`), on blocks so their plane is the robot marker
-   plane (measure the robot top height and set `P.cam.markerHeight` = `P.cam.cornerHeight`).
-5. **Camera**: straight above the arena, whole arena + apron + corner markers in view, fixed focus and exposure. Check it
-   alone: `python link\py\aruco_node.py --camera 0 --broker <ip> --show` (prints `homography ready`, then poses).
-   Optional: `--calib` with an OpenCV camera calibration.
-6. **Robots** on parking slots P1, P2, P3 (`P.brain.parking`: x 0.44 / 0.75 / 0.90, y -0.159, heading west), powered.
-7. **Run**: `run('E:\catrover_dumpautonomy\twin3d\startup.m')`, then `R = run_real();` (first `run_real('real',
-   struct('maxTime', 60))`). It checks broker, Python modules, corners, telemetry + poses of all three robots and the
-   slots, then runs with `syncToReal`; close the view or Ctrl+C to stop all robots. `run_real('dry')` is the same path
-   without hardware.
-8. Raise `maxTime` step by step; `R.lk` holds twin-vs-real error, latency and hold times per robot. A full fill
+1. **Python** (yourself): `pip install paho-mqtt numpy opencv-contrib-python pillow`.
+2. **Network**: switch on the PC's WiFi hotspot (Windows Mobile hotspot). `secrets.h` of every robot: hotspot SSID and
+   password, `MQTT_HOST` = the PC's hotspot address (usually 192.168.137.1). Keep `P.mqtt.broker = 'localhost'`.
+3. **Flash** (per robot N = 1..3, `firmware\README.md`): `pio run -e botN -t upload`, then `pio device monitor -e botN`
+   (boot banner, task stack report, bench self-test). A calibrated `TRACK_SCALE` goes into `P.bot.trackScale` too
+   (`test_firmware` checks it).
+4. **Broker**: nothing to start by hand for the run: when nothing answers on `P.mqtt.broker:P.mqtt.port` and that host
+   is this PC, `run_real` (`link_launch`) starts `link\py\mini_broker.py` on all interfaces, port `P.mqtt.port`, and
+   stops it at the end; a broker that already answers (Mosquitto, or a `mini_broker.py` you started) is used and left
+   running. **Firewall**: the first time Python listens on that port Windows asks; allow Python on **private** networks
+   (the hotspot is one), or the robots cannot connect.
+5. **Check each robot alone**: `python link\py\mini_broker.py` in one shell, `python link\py\bot_ping.py --seconds 5`
+   in another: one line per telemetry message (id, seq, x, y, heading, state) and the rate per robot (about
+   `P.link.telemetryHz`). Stop the hand-started broker (Ctrl+C) before `run_real`, or leave it: it is then used.
+6. **Markers**: in MATLAB `link_write_config(twin_params())`, then `python link\markers\make_markers.py`; print
+   `robots_A4.pdf` and `corners_A4.pdf` at 100 %, check the 50 mm bar. Marker id N on robot N, centred, arrow to the
+   nose. Corners 10-13 at `P.cam.cornerXY` (`placement.txt`), on blocks at the robot marker height
+   (`P.cam.markerHeight` = `P.cam.cornerHeight`).
+7. **Camera**: straight above the arena, whole arena + apron + corners in view, fixed focus and exposure. Alone:
+   `python link\py\aruco_node.py --camera 0 --show` (prints `homography ready`, then poses).
+8. **Robots** on parking slots P1, P2, P3 (`P.brain.parking`: x 0.44 / 0.75 / 0.90, y -0.159, heading west), powered.
+   Only the real ones need to be there.
+9. **Run**: `run('E:\catrover_dumpautonomy\twin3d\startup.m')`, then
+   - one real robot: `R = run_real('real', struct('realBots', 1, 'maxTime', 60));` (robots 2 and 3 are simulated by
+     `fake_bot.py` on the same broker, with their own camera pose; the camera node publishes robot 1 only)
+   - two: `struct('realBots', [1 2], ...)`; all three: `R = run_real();`
+   It checks Python modules, broker, corners, telemetry + camera pose of every robot, the parking slots of the real
+   robots, then runs with `syncToReal`; close the view or Ctrl+C to stop all robots. `run_real('dry', struct('realBots',
+   1))` is the same path without hardware (tested by `test_run_real` e).
+10. Raise `maxTime` step by step; `R.lk` holds twin-vs-real error, latency and hold times per robot. A full fill
    (about 2880 s sim time) takes as long in wall time.
+
+Optional Mosquitto instead of `mini_broker.py`: config `listener <P.mqtt.port> 0.0.0.0` + `allow_anonymous true`
+(closed network only), allow that TCP port in the firewall, start `mosquitto.exe -v -c <config>`; `run_real` then uses it.

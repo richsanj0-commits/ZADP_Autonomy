@@ -19,10 +19,10 @@ if isempty(exe), disp('demo_link: SKIP, Python is not available'); return; end
 fprintf('demo_link: Python %s, paho-mqtt %s\n', ver, yesno(hasPaho));
 
 procs = link_launch(P, struct('mode', opts.mode));
-killer = onCleanup(@() link_kill(procs)); %#ok<NASGU>
+killer = onCleanup(@() link_kill(procs));
 fprintf('  bridge mode: %s (port %d), PIDs %s\n', procs.mode, procs.port, mat2str(procs.pids));
 L = link_open(P, struct('port', procs.port));
-guard = onCleanup(@() link_close(L)); %#ok<NASGU>
+guard = onCleanup(@() link_close(L));
 
 [W, log, lk] = brain_run_linked(plan, P, struct('link', L, 'maxTime', opts.maxTime, 'seed', opts.seed, ...
     'syncToReal', opts.syncToReal));

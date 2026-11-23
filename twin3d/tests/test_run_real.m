@@ -69,7 +69,66 @@ catch err
 end
 assert(isempty(setdiff(listPython(), pidsBefore)), 'd: helper processes left');
 assert(isempty(findall(0, 'type', 'figure', '-regexp', 'Name', '^ZADP twin with the real robots')), 'd: figure left');
+
+% ---- e. mixed: robot 1 "real" (stand-in seen by the camera), robots 2 and 3 simulated with their own camera pose
+R = run_real('dry', struct('maxTime', 15, 'realBots', 1));
+m = R.mon; lk = R.lk;
+assert(isequal(R.realBots, 1) && isequal(R.simBots, [2 3]), 'e: realBots %s simBots %s', mat2str(R.realBots), mat2str(R.simBots));
+assert(numel(R.checks.park) == 1 && R.checks.park.bot == 1, 'e: park check must cover robot 1 only');
+assert(m.rrOverlapSteps == 0 && m.pileHitSteps == 0 && m.boundSteps == 0 && m.deadlocks == 0, 'e: twin safety monitors');
+assert(all(lk.worstErrBot < 0.030), 'e: twin-vs-real error %s mm', mat2str(round(1000*lk.worstErrBot, 1)));
+assert(lk.holdTimeouts == 0, 'e: %d hold timeouts', lk.holdTimeouts);
+assert(contains(R.camLog, 'robots [1]'), 'e: the camera node must publish robot 1 only');
+assert(contains(fileread(R.procs.logs.bots), 'bots [1] attached') && contains(fileread(R.procs.logs.sims), 'bots [2, 3] attached'), ...
+    'e: fake_bot.py groups');
+assert(isempty(setdiff(listPython(), pidsBefore)), 'e: helper processes left');
+fprintf('  e. mixed (realBots 1, simulated 2 3) 15 s: park robot 1 %.1f mm, %d commands, error worst %s mm, monitors 0, helpers gone\n', ...
+    1000*R.checks.park.dist, lk.nCmd, mat2str(round(1000*lk.worstErrBot, 1)));
+
+% ---- f. a robot id can never be both real and simulated (checked before any process starts)
+try
+    link_launch(P, struct('bots', 1:3, 'realBots', 2));
+    error('test:noError', 'f: link_launch simulated a real robot');
+catch err
+    assert(strcmp(err.identifier, 'link:realBot'), 'f: wrong error: %s (%s)', err.message, err.identifier);
+end
+fprintf('  f. bots 1:3 with realBots 2 -> %s\n', err.identifier);
+
+% ---- g. broker mode on a PRIVATE free port (never P.mqtt.port, where a real robot may listen): mini_broker.py is
+%      started when nothing answers, an answering broker is used as it is, link_kill stops only what it started
+[~, hasPaho] = link_python();
+if hasPaho
+    P2 = P; P2.mqtt.port = freePort();
+    assert(P2.mqtt.port ~= P.mqtt.port, 'g: private port');
+    A = link_launch(P2, struct('mode', 'broker', 'bots', []));
+    assert(strcmp(A.broker, 'mini') && strcmp(A.mode, 'broker'), 'g: first launch broker %s mode %s', A.broker, A.mode);
+    B = link_launch(P2, struct('mode', 'broker'));
+    assert(strcmp(B.broker, 'external'), 'g: second launch must use the running broker, got %s', B.broker);
+    L = link_open(P2, struct('port', B.port));
+    slot = P.brain.parking;
+    c = link_send_cmd(L, struct('id', 1, 'truck', 1, 'action', 'goto', 'x', slot(1,1) - 0.05, 'y', slot(1,2), 'heading', pi, 'speed', 0.2));
+    ok = false; t0 = tic;
+    while ~ok && toc(t0) < 8
+        link_keepalive(L); Rp = link_poll(L);
+        ok = any([Rp.telemetry.id] == 1 & [Rp.telemetry.seq] == c.seq & strcmp({Rp.telemetry.state}, 'arrived'));
+        pause(0.02);
+    end
+    link_close(L, false);
+    assert(ok, 'g: goto through mini_broker.py not arrived within 8 s');
+    tArr = toc(t0);
+    assert(isempty(link_kill(B)) && link_broker_status(P2), 'g: killing B must leave the broker of A running');
+    assert(isempty(link_kill(A)) && ~link_broker_status(P2), 'g: killing A must stop its mini_broker.py');
+    assert(isempty(setdiff(listPython(), pidsBefore)), 'g: helper processes left');
+    fprintf('  g. broker mode on private port %d: mini_broker.py started, reused by a second launch, goto arrived in %.2f s, stopped only by its starter\n', ...
+        P2.mqtt.port, tArr);
+else
+    fprintf('  g. SKIP broker mode: paho-mqtt not installed\n');
+end
 fprintf('test_run_real PASSED\n');
+
+function p = freePort()
+s = java.net.ServerSocket(0); p = double(s.getLocalPort()); s.close();
+end
 
 function closeAt(W, fig, t)
 if W.t >= t && isgraphics(fig), close(fig); end

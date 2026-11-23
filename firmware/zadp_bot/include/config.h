@@ -9,7 +9,7 @@
 //   [topics] twin3d/link/TOPICS.md (MQTT contract and firmware checklist)
 //   [ref]   the user's working micromouse firmware (include/robot_config.h, src/main.cpp), same ESP32 + TB6612
 //           + encoder hardware
-//   [fw]    chosen here for the firmware; not in the twin. Calibrate on the bench where marked CALIBRATE.
+//   [fw]    chosen here for the firmware; not in the twin.
 #pragma once
 
 // ---------------------------------------------------------------- identity
@@ -28,6 +28,7 @@
 // ---------------------------------------------------------------- MQTT [topics]
 #define TOPIC_CMD        "zadp/bot" ZADP_STR(BOT_ID) "/cmd"        // subscribe, QoS 1
 #define TOPIC_TELEMETRY  "zadp/bot" ZADP_STR(BOT_ID) "/telemetry"  // publish, QoS 0, retain off
+#define TOPIC_STATUS     "zadp/bot" ZADP_STR(BOT_ID) "/status"     // publish once per connect, QoS 0, RETAINED
 #define TOPIC_CAM_POSE   "zadp/cam/pose"                           // subscribe, QoS 0 (all robots)
 #define MQTT_CLIENT_ID   "zadp-bot" ZADP_STR(BOT_ID)
 #define MQTT_PORT        1883        // [twin] P.mqtt.port
@@ -72,9 +73,9 @@
 #define TRACK_M          0.0753f     // [twin] P.bot.track, [ref] 75.3 mm wheel centre to centre
 #define CPR_LEFT         2772.1f     // [ref] counts per wheel rev, 4x quadrature (twin uses the mean 2772.2)
 #define CPR_RIGHT        2772.3f     // [ref]
-// Track scale [twin] P.bot.trackScale (effective track = TRACK_M * TRACK_SCALE = P.bot.trackEff). CALIBRATE:
-// the reference firmware needed 1.14 (tyre scrub). If the robot under-turns on the floor while the encoders
-// report the full angle, raise it HERE AND in twin_params.m (P.bot.trackScale); check_numbers.py flags a mismatch.
+// Track scale [twin] P.bot.trackScale (effective track = TRACK_M * TRACK_SCALE = P.bot.trackEff). With the gyro it
+// only converts yaw rate to wheel speeds; without it, it also sets the encoder heading (the micromouse firmware
+// needed 1.14 for tyre scrub). Change it HERE AND in twin_params.m (P.bot.trackScale); check_numbers.py flags a mismatch.
 #define TRACK_SCALE      1.0f
 
 // ---------------------------------------------------------------- limits [twin]/[topics]
@@ -162,6 +163,7 @@
 #define TEL_TASK_STACK      4096     // snprintf with %f
 #define TEL_MUTEX_WAIT_MS   10       // max wait for the MQTT client lock; on timeout this telemetry slot is skipped
 #define TEL_BUF_SIZE        200      // bytes, one telemetry JSON (about 120 used)
+#define STATUS_BUF_SIZE     200      // bytes, the retained status JSON (about 130 used)
 #define CONSOLE_TASK_CORE   1        // serial bench self-test
 #define CONSOLE_TASK_PRIO   2
 #define CONSOLE_TASK_STACK  4096     // sscanf / printf with %f
@@ -182,12 +184,9 @@
 #define RAW_MAX_S           10.0f    // bench raw PWM test ('l', 'r', 'b'): longest allowed duration, s
 
 // ---------------------------------------------------------------- gyro [fw]
-// Optional MPU6050 yaw gyro: the heading step between camera fixes comes from the gyro instead of the wheel
-// difference (encoder-only turns slip on this robot: 79-95 deg for the same counts). Robot 1 has one.
-// Not modelled in the twin: it only makes the real heading better than the twin's odometry model.
-#ifndef USE_GYRO
-#define USE_GYRO            (BOT_ID == 1)
-#endif
+// MPU6050 yaw gyro, probed at boot on every robot (found = used, not found = encoders only). The heading step
+// between camera fixes comes from the gyro instead of the wheel difference (encoder-only turns slip on robot 1:
+// 79-95 deg for the same counts). Not modelled in the twin: it only makes the real heading better.
 #define PIN_I2C_SDA         21       // [ref]
 #define PIN_I2C_SCL         22       // [ref]
 #define GYRO_ADDR           0x68     // [ref] MPU6050
@@ -197,12 +196,13 @@
 #define GYRO_MAX_FAILS      100      // failed reads in a row before the gyro is switched off (0.5 s)
 #define GYRO_SIGN_MIN_RATE  1.0f     // rad/s from the encoders: above this the turn direction is certain
 #define GYRO_SIGN_SAMPLES   20       // ticks of such turning before the gyro sign is judged (0.1 s)
+#define GYRO_DEAD_RATE      0.2f     // rad/s: mean |gyro rate| below this while the encoders turn = the chip does not follow, gyro off
 #define GYRO_PERIOD_MS      5        // gyro task period (= control period)
 #define GYRO_STALE_MS       20       // a reading older than this is not used (heading falls back to the encoders)
 #define GYRO_TASK_CORE      1
 #define GYRO_TASK_PRIO      10       // below control (20), above console
 #define GYRO_TASK_STACK     3072
-#define PIN_TOF_XSHUT_LIST  23, 19, 18, 17, 16   // [ref] the 5 unused ToF sensors: held low = shutdown, off the bus
+#define PIN_TOF_XSHUT_LIST  23, 19, 18, 17, 16   // [ref] XSHUT of the 5 unused ToF sensors: held low = shutdown
 
 // ---------------------------------------------------------------- encoders [fw]
 // 1 = ESP32 PCNT hardware counters (x4 quadrature, glitch filter, no CPU load per edge); 0 = GPIO interrupts

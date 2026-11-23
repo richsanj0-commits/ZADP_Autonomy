@@ -73,12 +73,12 @@ void controlTask(void*) {
 
         // ---- control
         hw::encodersRead(l, r);
-        const float encRate = ((r - prevR) * (3.14159265f * WHEEL_DIAMETER_M / CPR_RIGHT) - (l - prevL) * (3.14159265f * WHEEL_DIAMETER_M / CPR_LEFT))
-                              / (TRACK_M * TRACK_SCALE) * CONTROL_HZ;
+        const zadp::Params& P = truck.params();
+        const float encRate = ((r - prevR) * P.mPerCountR() - (l - prevL) * P.mPerCountL()) / P.track * CONTROL_HZ;
         prevL = l; prevR = r;
         hw::gyroCheckSign(encRate);                              // rule: gyro sign follows the encoders' turn direction
         float gz = 0.f;
-        const bool gyro = hw::gyroRate(gz);                      // bounded I2C read (GYRO_I2C_TIMEOUT_MS); false = encoders
+        const bool gyro = hw::gyroRate(gz);                      // latest reading of the gyro task, no I2C; false = encoders
         truck.step(now, l, r, gyro, gz);
 
         // rule: MQTT down longer than LINK_LOSS_STOP_S = motors off, unless a bench command / raw test runs.

@@ -291,7 +291,7 @@ class CameraSource:
 class SimSource:
     """True poses from fake_bot.py --truth -> synthetic marker pixels (same geometry downstream)."""
 
-    def __init__(self, link, cam, args):
+    def __init__(self, cam, args):
         self.cam = cam
         self.camera = default_sim_camera(cam)
         self.size = self.camera.size
@@ -303,7 +303,6 @@ class SimSource:
         self.period = 1.0 / cam['rateHz']
         self.next = time.monotonic()
         self.frame = None
-        self.link = link
 
     def on_truth(self, topic, p):
         if topic == TOPIC_TRUTH and isinstance(p, dict):
@@ -349,6 +348,8 @@ def main():
     ap.add_argument('--sim-noise-px', type=float, default=0.3, help='sim: corner pixel noise (std)')
     ap.add_argument('--sim-seed', type=int, default=1)
     ap.add_argument('--sim-hide-corner', default='', help='sim: corner ids to hide (comma list), to test corner loss')
+    ap.add_argument('--robots', default=None, help='robot ids to publish (comma list, default P.cam.robotIds; '
+                    'run_real gives the real robots only, so a simulated robot id is never published)')
     ap.add_argument('--show', action='store_true', help='preview window (camera only)')
     ap.add_argument('--log', default='', help='write output to this file (used when started in the background)')
     ap.add_argument('--ttl', type=float, default=0, help='exit by itself after this many seconds (0 = never)')
@@ -366,11 +367,13 @@ def main():
     cam = cfg['cam']
     topic = cfg['mqtt']['topicCamPose']
     robot_ids = set(int(i) for i in cam['robotIds'])
+    if args.robots is not None:
+        robot_ids &= set(int(i) for i in args.robots.split(',') if i.strip())
     t_end = time.monotonic() + args.ttl if args.ttl > 0 else None
 
     link = make_link(args, cfg)
     if args.sim:
-        src = SimSource(link, cam, args)
+        src = SimSource(cam, args)
         link.subscribe([TOPIC_TRUTH], src.on_truth)
     else:
         try:

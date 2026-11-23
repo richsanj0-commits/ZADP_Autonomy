@@ -1,6 +1,8 @@
 function R = run_real(mode, opts)
 %RUN_REAL  One command to run the twin with the REAL robots (the twin leads, the robots follow).
 %   R = run_real()            real hardware: broker, 3 ESP32 robots, webcam + ArUco markers
+%   R = run_real('real', struct('realBots', 1))   robot 1 real, robots 2 and 3 simulated by fake_bot.py on the same
+%                             broker (the 3-robot twin runs with 1, 2 or 3 real robots)
 %   R = run_real('dry')       the SAME code path without hardware: loopback bridge, fake_bot.py robots (no camera of
 %                             their own) and aruco_node.py --sim (synthetic marker pixels through the real geometry)
 %   R = run_real(mode, opts)  opts: maxTime (sim s = wall s, default 600 real / 30 dry), syncToReal (true),
@@ -8,36 +10,49 @@ function R = run_real(mode, opts)
 %                             still driven, so the path is tested), viewDt (s between view refreshes, 0.2),
 %                             camArgs (extra aruco_node.py arguments, e.g. '--camera 1 --width 1920 --height 1080'),
 %                             plan (plan file, default plan/plan_arena.json), seed (1),
-%                             dry only: init (N-by-3 fake robot start poses, default the parking slots),
+%                             realBots (ids of the real robots, default 1:P.bot.count; the others are simulated by
+%                             fake_bot.py with their own camera pose; in dry the real ones are fake_bot.py stand-ins
+%                             seen by the simulated camera),
+%                             dry only: init (N-by-3 fake robot start poses, row i = robot i, default the parking slots),
 %                             simHideCorner (corner ids hidden from the simulated camera, e.g. '11'),
 %                             viewHook (function viewHook(W, fig) called after each view refresh; the test uses it
 %                             to close the view like a user)
 %   Steps (each prints one line; any failure stops with a message that says what to fix):
 %     1. writes link/link_config.json from twin_params (the single source; every helper reads it)
 %     2. preflight: Python, numpy, paho-mqtt (real), OpenCV with cv2.aruco (real), broker reachable at
-%        P.mqtt.broker:P.mqtt.port (real)
-%     3. starts bridge.py (real: broker mode, no fallback; dry: loopback) and aruco_node.py (+ fake robots in dry);
-%        waits until the camera node has seen all corner markers (P.link.camStartTimeout)
+%        P.mqtt.broker:P.mqtt.port (real; when none answers and that host is this PC, link_launch starts
+%        py/mini_broker.py and link_kill stops it at the end)
+%     3. starts bridge.py (real: broker mode, no fallback; dry: loopback), aruco_node.py (publishes the real robots
+%        only), fake_bot.py for the simulated robots (+ stand-ins for the real ones in dry); waits until the camera
+%        node has seen all corner markers (P.link.camStartTimeout)
 %     4. waits for telemetry AND a camera pose from every robot (P.link.readyTimeout)
-%     5. checks every robot i stands on parking slot P<i> (P.link.parkTol, P.link.parkTolDeg) and names any that does not
+%     5. checks every REAL robot i stands on parking slot P<i> (P.link.parkTol, P.link.parkTolDeg) and names any that
+%        does not (a simulated robot starts on its slot by construction)
 %     6. brain_run_linked with syncToReal and the live 3D view drawn at the REAL (camera) poses
 %   Any error, Ctrl+C or closing the view sends stop to every robot, closes the link and kills every helper process.
-%   R: mode, lk, mon (twin safety monitors), log, procs, checks (struct of the preflight / ready / park results), camLog.
+%   R: mode, realBots, simBots, lk, mon (twin safety monitors), log, procs, checks (preflight / corners / ready flags,
+%   park = bot, dist, headingDeg per real robot), camLog.
 if nargin < 1 || isempty(mode), mode = 'real'; end
 if nargin < 2, opts = struct(); end
 mode = validatestring(mode, {'real', 'dry'});
 dry = strcmp(mode, 'dry');
 here = fileparts(mfilename('fullpath'));
 def = struct('maxTime', 600 - 570*dry, 'syncToReal', true, 'show', ~dry, 'viewDt', 0.2, 'camArgs', '', ...
-    'plan', fullfile(fileparts(here), 'plan', 'plan_arena.json'), 'seed', 1, 'init', [], 'simHideCorner', '', 'viewHook', []);
+    'plan', fullfile(fileparts(here), 'plan', 'plan_arena.json'), 'seed', 1, 'init', [], 'simHideCorner', '', 'viewHook', [], ...
+    'realBots', 'all');
 f = fieldnames(def);
 for i = 1:numel(f), if ~isfield(opts, f{i}), opts.(f{i}) = def.(f{i}); end, end
 
 P = twin_params();
 nb = P.bot.count;
+if ischar(opts.realBots), opts.realBots = 1:nb; end
+realBots = unique(opts.realBots(:)');
+assert(all(ismember(realBots, 1:nb)), 'run_real:realBots', 'realBots must be robot ids 1..%d', nb);
+simBots = setdiff(1:nb, realBots);
 plan = load_plan(opts.plan);
 Lay = brain_layout(plan, P);
-R = struct('mode', mode, 'lk', [], 'mon', [], 'log', [], 'procs', [], 'checks', struct(), 'camLog', '');
+R = struct('mode', mode, 'realBots', realBots, 'simBots', simBots, 'lk', [], 'mon', [], 'log', [], 'procs', [], ...
+    'checks', struct(), 'camLog', '');
 say = @(varargin) fprintf(['run_real(%s): ' varargin{1} '\n'], mode, varargin{2:end});
 
 % ---- 1. config (single source)
@@ -61,37 +76,50 @@ end
 if ~dry
     if ~hasPaho, error('run_real:pydeps', 'paho-mqtt missing: pip install paho-mqtt'); end
     say('[ok] Python module paho.mqtt');
-    try
-        t = tcpclient(P.mqtt.broker, P.mqtt.port, 'ConnectTimeout', 2); delete(t);
-    catch err
-        error('run_real:broker', ['no MQTT broker at %s:%d (%s). Start Mosquitto on that PC (mosquitto -v -c ' ...
-            'mosquitto.conf with "listener 1883 0.0.0.0" and "allow_anonymous true"), allow TCP 1883 in its firewall, ' ...
-            'and set P.mqtt.broker in twin_params.m to its address (the firmware secrets.h MQTT_HOST must be the same).'], ...
-            P.mqtt.broker, P.mqtt.port, err.message);
+    [up, isLocal] = link_broker_status(P);
+    if up
+        say('[ok] broker reachable at %s:%d (used as it is)', P.mqtt.broker, P.mqtt.port);
+    elseif isLocal
+        % rule: no broker on this PC -> link_launch starts py/mini_broker.py on 0.0.0.0:P.mqtt.port (killed at the end)
+        say('[ok] no broker at %s:%d: link_launch starts mini_broker.py on this PC (port %d, all interfaces)', ...
+            P.mqtt.broker, P.mqtt.port, P.mqtt.port);
+    else
+        error('run_real:broker', ['no MQTT broker at %s:%d, and that host is not this PC (mini_broker.py runs only ' ...
+            'here). Start a broker there (Mosquitto with "listener %d 0.0.0.0" and "allow_anonymous true", or ' ...
+            'python link\\py\\mini_broker.py), allow TCP %d in its firewall, or set P.mqtt.broker in twin_params.m ' ...
+            'to this PC (the firmware secrets.h MQTT_HOST must point at the same PC).'], P.mqtt.broker, P.mqtt.port, ...
+            P.mqtt.port, P.mqtt.port);
     end
-    say('[ok] broker reachable at %s:%d', P.mqtt.broker, P.mqtt.port);
 end
 R.checks.preflight = true;
 
 % ---- 3. helpers
-lo = struct('mode', 'loopback', 'noBots', ~dry, 'fakeCam', false, 'camNode', 'sim', 'camArgs', opts.camArgs, ...
-    'config', cfgFile, 'ttl', opts.maxTime + 600, 'port', P.link.bridgePort);
+% rule: the camera node publishes the real robots only; the simulated ones publish their own camera pose
+lo = struct('mode', 'loopback', 'bots', realBots, 'fakeCam', false, 'simBots', simBots, 'realBots', [], ...
+    'camNode', 'sim', 'camBots', realBots, 'camArgs', opts.camArgs, 'config', cfgFile, 'ttl', opts.maxTime + 600, ...
+    'port', P.link.bridgePort, 'init', Lay.slot);
 if dry
+    % dry: fake_bot.py stand-ins (no camera of their own, --truth) play the real robots
     lo.port = [];                                         % random port: never collides with a real bridge
     if ~isempty(opts.simHideCorner), lo.camArgs = strtrim([lo.camArgs ' --sim-hide-corner ' opts.simHideCorner]); end
-    lo.init = Lay.slot; if ~isempty(opts.init), lo.init = opts.init; end
+    if ~isempty(opts.init), lo.init = opts.init; end
 else
-    lo.mode = 'broker'; lo.camNode = 'real';
+    lo.mode = 'broker'; lo.camNode = 'real'; lo.bots = []; lo.realBots = realBots;
 end
+say('real robots %s, simulated robots %s', mat2str(realBots), mat2str(simBots));
 h = [];
 % cleanup state in a handle object: an onCleanup must not read the function's own variables (MATLAB may have
 % destroyed them already when an error unwinds), so it gets this map, filled as things start
 ctx = containers.Map();
-cleanup = onCleanup(@() shutdownReal(ctx)); %#ok<NASGU>
+cleanup = onCleanup(@() shutdownReal(ctx));
 procs = link_launch(P, lo);
 ctx('procs') = procs;
 R.procs = procs;
 say('[ok] bridge mode %s on port %d, helpers %s (logs in %s)', procs.mode, procs.port, mat2str(procs.pids), tempdir);
+if strcmp(procs.broker, 'mini')
+    say('[ok] mini_broker.py started on port %d (log %s); robots must reach this PC on TCP %d (firewall: allow Python on private networks)', ...
+        P.mqtt.port, procs.logs.broker, P.mqtt.port);
+end
 if ~dry && ~strcmp(procs.mode, 'broker'), error('run_real:bridge', 'bridge is not in broker mode (%s)', procs.mode); end
 t0 = tic;
 while ~contains(readLog(procs.logs.cam), 'homography ready')
@@ -119,21 +147,23 @@ while true
     if all(hasTel) && all(hasCam), break; end
     if toc(t0) > P.link.readyTimeout
         error('run_real:notReady', ['after %g s: no telemetry from robot(s) %s (power, WiFi, secrets.h MQTT_HOST = ' ...
-            'P.mqtt.broker?), no camera pose for robot(s) %s (marker id = robot number, in view, lit?)'], ...
-            P.link.readyTimeout, mat2str(find(~hasTel)), mat2str(find(~hasCam)));
+            'this PC?), no camera pose for robot(s) %s (marker id = robot number, in view, lit?); simulated robots %s ' ...
+            '(log %s)'], P.link.readyTimeout, mat2str(find(~hasTel)), mat2str(find(~hasCam)), mat2str(simBots), ...
+            procs.logs.sims);
     end
     pause(0.05);
 end
 say('[ok] telemetry and camera poses from robots %s', mat2str(1:nb));
 R.checks.ready = true;
 
-% ---- 5. on the parking slots (the twin starts robot i on slot P<i>)
+% ---- 5. real robots on the parking slots (the twin starts robot i on slot P<i>)
 bad = {};
-for k = 1:nb
+R.checks.park = struct('bot', {}, 'dist', {}, 'headingDeg', {});
+for k = realBots
     s = Lay.slot(k, :);
     d = hypot(cam{k}.x - s(1), cam{k}.y - s(2));
     dh = abs(rad2deg(atan2(sin(cam{k}.heading - s(3)), cos(cam{k}.heading - s(3)))));
-    R.checks.park(k) = struct('dist', d, 'headingDeg', dh);
+    R.checks.park(end+1) = struct('bot', k, 'dist', d, 'headingDeg', dh);
     if d > P.link.parkTol || dh > P.link.parkTolDeg
         bad{end+1} = sprintf('robot %d is %.0f mm / %.0f deg from P%d (x %.3f, y %.3f, heading %.0f deg); camera sees x %.3f, y %.3f, heading %.0f deg', ...
             k, 1000*d, dh, k, s(1), s(2), rad2deg(s(3)), cam{k}.x, cam{k}.y, rad2deg(cam{k}.heading)); %#ok<AGROW>
@@ -143,7 +173,10 @@ if ~isempty(bad)
     error('run_real:park', 'place the robots on their parking slots (within %.0f mm, %.0f deg):\n  %s', ...
         1000*P.link.parkTol, P.link.parkTolDeg, strjoin(bad, '\n  '));
 end
-say('[ok] every robot on its parking slot (worst %.1f mm, %.1f deg)', 1000*max([R.checks.park.dist]), max([R.checks.park.headingDeg]));
+if ~isempty(realBots)
+    say('[ok] real robots %s on their parking slots (worst %.1f mm, %.1f deg)', mat2str(realBots), ...
+        1000*max([R.checks.park.dist]), max([R.checks.park.headingDeg]));
+end
 
 % ---- 6. run, live view at the real poses
 vis = 'off'; if opts.show, vis = 'on'; end
@@ -174,7 +207,7 @@ R.camLog = readLog(procs.logs.cam);
             if ~isempty(c) && toc(L.t0) - c.tRecv < 0.5, s.pose(kk, :) = [c.x, c.y, c.heading]; end
         end
         world_sync(h, s);
-        world_hud(h, W.t, W.truckNo, size(W.piles, 1), nSpots, 0, 0, sprintf('REAL robots (%s camera poses)', mode));
+        world_hud(h, W.t, W.truckNo, size(W.piles, 1), nSpots, 0, 0, sprintf('real robots %s (%s)', mat2str(realBots), mode));
         drawnow limitrate;
         nView = nView + 1;
         if ~isempty(opts.viewHook), opts.viewHook(W, h.fig); end

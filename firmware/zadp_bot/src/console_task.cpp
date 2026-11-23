@@ -48,7 +48,7 @@ static void printStatus() {
     getSnapshot(s);
     Serial.printf("[%lu ms] bot %d seq %lu state %s%s%s%s | pose %.4f %.4f %.1f deg | enc %ld %ld | v %.3f %.3f ref %.3f %.3f "
                   "pwm %.0f %.0f | wifi %d mqtt %d (connects %lu) | rx cmd %lu (new %lu rep %lu) cam %lu (acc %lu rej %lu) "
-                  "tel %lu (skipped %lu) | ticks %lu overruns %lu exec max %lu us drops %lu badjson %lu\n",
+                  "tel %lu (skipped %lu) | ticks %lu overruns %lu exec max %lu us drops %lu badjson %lu | gyro %s | reset %s\n",
                   (unsigned long)millis(), BOT_ID, (unsigned long)s.seq, zadp::stateName(s.state), s.stalled ? " (watchdog)" : "",
                   s.raw ? " (raw)" : "", s.linkStop ? " (link lost: motors off)" : "", (double)s.x, (double)s.y,
                   (double)(s.h * 180.f / zadp::kPi), (long)s.encL, (long)s.encR, (double)s.vL, (double)s.vR, (double)s.refL,
@@ -57,7 +57,8 @@ static void printStatus() {
                   (unsigned long)s.cmdRepeat, (unsigned long)rxCam.load(), (unsigned long)s.camAccepted,
                   (unsigned long)s.camRejected, (unsigned long)telSent.load(), (unsigned long)telSkipped.load(),
                   (unsigned long)s.ticks, (unsigned long)s.overruns, (unsigned long)s.execMaxUs,
-                  (unsigned long)ctrlDrops.load(), (unsigned long)badJson.load());
+                  (unsigned long)ctrlDrops.load(), (unsigned long)badJson.load(), hw::gyroOk() ? "on" : "off",
+                  resetReasonText());
 }
 
 static bool localCommand(zadp::Action a, float x, float y, float h, int dir) {

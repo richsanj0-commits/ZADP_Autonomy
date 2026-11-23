@@ -47,11 +47,9 @@ class Hub:
         self.last_seq = {}                    # cmd topic -> seq of the last cmd published (repeats go out at QoS 0)
         self.last_cmd = {}                    # cmd topic -> (payload, client) of the last command (keep-alive repeats)
         self.lock = threading.Lock()
-        self.counts = {}
         self.mode = 'broker' if paho else 'loopback'
         self.repeat_hz = repeat_hz
         self.host_timeout = host_timeout
-        self.n_repeats = 0
 
     def repeater(self):
         # rule: repeat each robot's last command (same seq) at repeat_hz while its sender is connected and was
@@ -67,7 +65,6 @@ class Hub:
                          if pc[1] in self.clients and now - pc[1][3] <= self.host_timeout]
             for topic, payload in items:
                 self.publish(topic, payload, repeat=True)
-                self.n_repeats += 1
             if now - nxt > 1.0:
                 nxt = now                     # the machine was suspended: do not burst
 
@@ -102,7 +99,6 @@ class Hub:
                 return
 
     def publish(self, topic, payload, repeat=False, client=None):
-        self.counts[topic] = self.counts.get(topic, 0) + 1
         if not repeat and client is not None and topic.endswith('/cmd'):
             with self.lock:
                 self.last_cmd[topic] = (payload, client)
@@ -213,7 +209,7 @@ def main():
         if have and not broker_up(a.broker, a.broker_port):
             have, why = False, 'no broker at %s:%d' % (a.broker, a.broker_port)
         if have:
-            paho = PahoClient(a.broker, a.broker_port, client_id='zadp-bridge')
+            paho = PahoClient(a.broker, a.broker_port, client_id='zadp-bridge-%d' % os.getpid())
         elif a.no_fallback:
             print('bridge: %s and --no-fallback given' % why, file=sys.stderr, flush=True)
             sys.exit(2)

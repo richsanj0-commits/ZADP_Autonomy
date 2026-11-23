@@ -6,6 +6,7 @@
 // task for up to the TCP connect timeout):
 //   WIFI_DOWN --WiFi up--> MQTT_DOWN --connect ok--> MQTT_UP --socket lost--> MQTT_DOWN --WiFi lost--> WIFI_DOWN
 // Retries back off exponentially: WiFi WIFI_RETRY_MS .. WIFI_RETRY_MAX_MS, broker MQTT_RETRY_MS .. MQTT_RETRY_MAX_MS.
+// On each connect: retained zadp/botN/status (build, reset reason, gyro, ip, rssi), then one telemetry message.
 // Contract: twin3d/link/TOPICS.md (QoS, clean session, keep-alive 15 s, last will offline).
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -15,6 +16,7 @@
 #include <freertos/semphr.h>
 
 #include "app.h"
+#include "hw.h"
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -98,6 +100,15 @@ static bool publishTelemetryLocked() {
     if (!getSnapshot(s)) return false;
     int n = formatTelemetry(s, buf, sizeof buf);
     return n > 0 && mqtt.publish(TOPIC_TELEMETRY, buf, false);
+}
+
+// caller holds mqttMutex. contract: zadp/botN/status, retained, once per connect (boot diagnosis without USB)
+static bool publishStatusLocked() {
+    char buf[STATUS_BUF_SIZE];
+    int n = snprintf(buf, sizeof buf, "{\"id\":%d,\"fw\":\"%s\",\"reset\":\"%s\",\"gyro\":%s,\"ip\":\"%s\",\"rssi\":%d}", BOT_ID,
+                     fwBuild(), resetReasonText(), hw::gyroOk() ? "true" : "false", WiFi.localIP().toString().c_str(),
+                     (int)WiFi.RSSI());
+    return n > 0 && n < (int)sizeof buf && mqtt.publish(TOPIC_STATUS, buf, true);
 }
 
 bool commsPublish(const char* topic, const char* payload, TickType_t wait) {
@@ -200,6 +211,7 @@ void commsTask(void*) {
                         mqttWait = MQTT_RETRY_MS;
                         ++mqttConnects;
                         xEventGroupSetBits(linkEvents, LINK_MQTT_UP);
+                        if (!publishStatusLocked()) Serial.println("[mqtt] status publish failed");
                         if (publishTelemetryLocked()) ++telSent; // announce the robot at once
                     }
                 } else {

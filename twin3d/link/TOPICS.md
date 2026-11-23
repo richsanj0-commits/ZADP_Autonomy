@@ -14,6 +14,10 @@ heading counter-clockwise from +x, wrapped to (-pi, pi]. The apron is y in [-0.2
 | `zadp/botN/cmd` | brain -> robot | new command + bridge repeats at `P.link.repeatHz` (10 Hz) | 1 new seq, 0 repeats | `{id, truck, seq, action, x, y, heading, speed[, dir, tol]}` |
 | `zadp/botN/telemetry` | robot -> brain | `P.link.telemetryHz` (20 Hz) + at once on a new seq | 0, not retained | `{id, seq, encL, encR, x, y, heading, state}` |
 | `zadp/cam/pose` | camera -> all | `P.cam.rateHz` (30 Hz) per visible robot | 0 | `{bot, x, y, heading, t, age}` |
+| `zadp/botN/status` | robot -> anyone | once per MQTT connect | 0, **retained** | `{id, fw, reset, gyro, ip, rssi}` |
+
+`status` (firmware only, diagnosis): build date `fw`, `reset` = reason of the last reboot (e.g. `poweron`, `brownout`,
+`task watchdog`, `panic`), `gyro` true/false, WiFi `ip` and `rssi` (dBm). Retained: `mosquitto_sub -t zadp/+/status -v`.
 
 Robot subscriptions: `zadp/botN/cmd` at QoS 1, `zadp/cam/pose` at QoS 0, clean session (no queued old commands).
 MQTT client id `zadp-botN`, keep-alive 15 s, automatic reconnect. Last will: `{"id":N,"state":"offline"}` on

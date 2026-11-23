@@ -1,16 +1,18 @@
 // main.cpp : ZADP truck robot (ESP32 DevKit, TB6612FNG, two quadrature encoders), FreeRTOS application.
 //
-// setup() forces the motors off, starts the encoders, creates the queues / event group / mutex, configures the
-// task watchdog and starts five pinned tasks (table in ../README.md, numbers in include/config.h):
+// setup() forces the motors off, starts the encoders, probes the gyro (starts its task if found), creates the
+// queues / event group / mutex, configures the task watchdog and starts five pinned tasks (table in ../README.md,
+// numbers in include/config.h):
 //   control   core 1  prio CTRL_TASK_PRIO     CONTROL_HZ   encoders, odometry, fusion, laws, wheel PI, PWM, watchdogs
 //   telemetry core 0  prio TEL_TASK_PRIO      TELEMETRY_HZ + ack on new seq
-//   comms     core 0  prio COMMS_TASK_PRIO    WiFi + MQTT state machine, JSON -> queues
+//   comms     core 0  prio COMMS_TASK_PRIO    WiFi + MQTT state machine, JSON -> queues, status on connect
 //   console   core 1  prio CONSOLE_TASK_PRIO  serial bench self-test
 //   health    core 1  prio HEALTH_TASK_PRIO   status LED
 // The Arduino loop task is deleted: nothing runs as a polling loop.
 // Contract: twin3d/link/TOPICS.md. Behaviour: twin3d/link/py/fake_bot.py. Maths: include/motion_core.h.
 #include <Arduino.h>
 #include <esp_idf_version.h>
+#include <esp_system.h>
 #include <esp_task_wdt.h>
 
 #if __has_include(<esp_arduino_version.h>)
@@ -46,6 +48,25 @@ bool getSnapshot(Snapshot& s) {
     if (xQueuePeek(snapQ, &s, 0) == pdTRUE) return true;
     s = Snapshot();
     return false;
+}
+
+const char* fwBuild() { return __DATE__ " " __TIME__; }
+
+const char* resetReasonText() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON: return "poweron";
+        case ESP_RST_EXT: return "external pin";
+        case ESP_RST_SW: return "software";
+        case ESP_RST_PANIC: return "panic";
+        case ESP_RST_INT_WDT: return "interrupt watchdog";
+        case ESP_RST_TASK_WDT: return "task watchdog";
+        case ESP_RST_WDT: return "other watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep sleep";
+        case ESP_RST_BROWNOUT: return "brownout";
+        case ESP_RST_SDIO: return "sdio";
+        case ESP_RST_UNKNOWN: return "unknown";
+        default: return "other";                                 // IDF 5 adds USB, JTAG, eFuse, power glitch, lockup
+    }
 }
 
 }  // namespace app
@@ -90,8 +111,8 @@ void setup() {
     digitalWrite(PIN_LED, LOW);
     Serial.begin(SERIAL_BAUD);
     hw::encodersBegin();
-    const bool gyro = hw::gyroBegin();                           // 0.9 s, robot still (bias); false = encoders only
-    Serial.printf("gyro: %s\n", gyro ? "ok (heading rate from the gyro)" : "off (heading from the encoders)");
+    hw::gyroBegin();                                             // 0.9 s, robot still (bias); none found = encoders only
+    Serial.printf("gyro: %s (WHO_AM_I 0x%02X)\n", hw::gyroStatus(), hw::gyroWhoAmI());
 
     ctrlQ = xQueueCreate(CMD_QUEUE_LEN, sizeof(CtrlMsg));
     camQ = xQueueCreate(CAM_QUEUE_LEN, sizeof(CamMsg));
@@ -104,6 +125,7 @@ void setup() {
     Serial.printf("\nZADP truck bot %d, arduino-esp32 core %d.x, ESP-IDF %d.%d, encoders %s, cmd %s, telemetry %s\n", BOT_ID,
                   ESP_ARDUINO_VERSION_MAJOR, ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, hw::encoderBackend(), TOPIC_CMD,
                   TOPIC_TELEMETRY);
+    Serial.printf("build %s, reset reason: %s, gyro: %s\n", fwBuild(), resetReasonText(), hw::gyroStatus());
     Serial.printf("FreeRTOS: control %d Hz (core %d prio %d), telemetry %d Hz, task watchdog %d ms, link-loss stop %.2f s\n",
                   CONTROL_HZ, CTRL_TASK_CORE, CTRL_TASK_PRIO, TELEMETRY_HZ, TWDT_TIMEOUT_MS, (double)LINK_LOSS_STOP_S);
     twdtConfigure();

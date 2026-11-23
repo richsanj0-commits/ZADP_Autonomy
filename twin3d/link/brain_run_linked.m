@@ -34,7 +34,7 @@ for i = 1:numel(f), if ~isfield(opts, f{i}), opts.(f{i}) = def.(f{i}); end, end
 nb = P.bot.count;
 own = isempty(opts.link);
 if own, L = link_open(P, opts); else, L = opts.link; end
-cleanup = onCleanup(@() closeIfOwn(own, L)); %#ok<NASGU>
+cleanup = onCleanup(@() closeIfOwn(own, L));
 
 % ---- state shared by the hooks (nested functions)
 cmdLog = []; latest = cell(1, nb); latestCam = cell(1, nb);

@@ -1,7 +1,7 @@
 function L = link_open(P, opts)
 %LINK_OPEN  Connect MATLAB to bridge.py (localhost TCP, newline-delimited JSON) and subscribe to
 %   the telemetry and camera topics of the contract (link/TOPICS.md).
-%   L = link_open(P, opts)   opts.host ('127.0.0.1'), opts.port (18830), opts.timeout (s, default 10: the
+%   L = link_open(P, opts)   opts.host ('127.0.0.1'), opts.port (P.link.bridgePort), opts.timeout (s, default 10: the
 %   bridge may still be starting). Uses base MATLAB only (tcpclient, jsonencode/jsondecode).
 %   L: tcp (tcpclient), P, t0 (tic, the link clock: toc(L.t0) seconds), st (containers.Map with the mutable
 %   state: receive buffer, per-robot command counter, message counters, last commands, 'mode' = bridge mode

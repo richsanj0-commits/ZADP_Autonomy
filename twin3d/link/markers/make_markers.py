@@ -35,7 +35,6 @@ def main():
         print('make_markers: OpenCV with cv2.aruco is needed (pip install opencv-contrib-python): %s' % e, file=sys.stderr)
         return 2
     from PIL import Image, ImageDraw, ImageFont
-    import numpy as np
 
     cam = json.load(open(a.config))['cam']
     dpi = a.dpi

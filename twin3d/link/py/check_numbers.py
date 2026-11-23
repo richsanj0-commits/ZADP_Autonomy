@@ -8,7 +8,6 @@ value) and exits 1 on any mismatch. Also checks the firmware-only constants that
 """
 import argparse
 import json
-import math
 import os
 import re
 import sys

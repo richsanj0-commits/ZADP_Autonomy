@@ -299,6 +299,12 @@ def main():
               all(i in last and last[i]['seq'] == seqs[i] and last[i]['state'] == 'arrived'
                   and abs(last[i]['heading'] - 1.5708) < 0.1 for i in (1, 2, 3)),
               '%.1f s; ' % dt + ', '.join('bot%d %s %.2f' % (i, last[i]['state'], last[i]['heading']) for i in sorted(last)))
+        # a second fake_bot for id 2 while robot 2 is on the broker must refuse (exit 1, clear message)
+        r = subprocess.run([PY, '-u', os.path.join(HERE, 'fake_bot.py'), '--bots', '2', '--broker', '127.0.0.1:%d' % port,
+                            '--config', cfg, '--ttl', '30'], capture_output=True, text=True, timeout=20)
+        check('second fake_bot for a robot already on the broker refuses (exit 1, message)',
+              r.returncode == 1 and 'robot 2 is already on the broker: switch it off or add it to realBots' in r.stdout,
+              'rc %d, %s' % (r.returncode, r.stdout.strip()[-80:]))
         fb.kill()
         fb.wait(5)
         tel.wait(len(tel.msgs) + 1, 2)

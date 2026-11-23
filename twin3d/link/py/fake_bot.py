@@ -363,6 +363,7 @@ class Bot:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--bots', default='1,2,3', help='robot numbers simulated by this process')
+    ap.add_argument('--real', default='', help='robot numbers that are real hardware: refused in --bots')
     ap.add_argument('--init', action='append', default=[], help='N=x,y,heading start pose (repeatable)')
     ap.add_argument('--config', default=DEFAULT_CONFIG, help='link_config.json written by MATLAB (link_write_config)')
     ap.add_argument('--connect', default='127.0.0.1:18830', help='bridge host:port (default)')
@@ -383,6 +384,10 @@ def main():
     tcmd, ttel, tcam = C['mqtt']['topicCmd'], C['mqtt']['topicTelemetry'], C['mqtt']['topicCamPose']
 
     ids = [int(s) for s in a.bots.split(',') if s]
+    real = sorted(set(ids) & set(int(s) for s in a.real.split(',') if s))
+    if real:
+        # rule: never simulate a real robot (its telemetry would be answered twice, its commands by a ghost)
+        sys.exit('fake_bot: robot(s) %s are real hardware: refused' % real)
     starts = {}
     for s in a.init:
         n, v = s.split('=')
@@ -397,8 +402,26 @@ def main():
         host, _, port = a.connect.partition(':')
         link = BridgeClient(host, int(port))
     inbox = queue.SimpleQueue()
-    link.subscribe([tcmd % i for i in ids] + [tcam], lambda t, p: inbox.put((t, p)))
+    tel_topics = {ttel % i: i for i in ids}
+    watch = bool(a.broker or a.real)      # a real broker is behind it: --broker, or the bridge of a mixed run (--real)
+    # a robot listed as simulated may really be powered on this broker, then both it and this process
+    # would answer its commands: listen to its telemetry first (the extra subscription is ignored afterwards)
+    link.subscribe([tcmd % i for i in ids] + [tcam] + (list(tel_topics) if watch else []),
+                   lambda t, p: inbox.put((t, p)))
     link.connect(10.0)
+    if watch:
+        t_end = time.monotonic() + 2.5
+        while time.monotonic() < t_end:
+            try:
+                topic, _ = inbox.get(timeout=0.05)
+            except queue.Empty:
+                continue
+            if topic in tel_topics:
+                rid = tel_topics[topic]
+                link.close()
+                print('fake_bot: robot %d is already on the broker: switch it off or add it to realBots' % rid,
+                      flush=True)
+                sys.exit(1)
     print('fake_bot: bots %s attached (%s), pid=%d' % (ids, a.broker or a.connect, os.getpid()), flush=True)
 
     t0 = time.monotonic()
