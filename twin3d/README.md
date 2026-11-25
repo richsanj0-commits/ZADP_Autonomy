@@ -14,13 +14,14 @@ absolute pose. Needs only MATLAB R2026a, Simulink, Simulink 3D Animation, Statef
 - `bot/`     single-robot physics, encoders, go-to-point controller (phase 3)
 - `world3d/` 3D scene, haul trucks, piles, replay and live view (phase 6, see `world3d/README.md`)
 - `simulink/` `zadp_twin.slx`: Brain + 3D View as MATLAB System blocks (phase 6, see `simulink/README.md`)
-- `link/`    MQTT link; `TOPICS.md` is the message contract (phase 7)
+- `link/`    MQTT link, `run_real` launcher, Python side in `link/py/`, marker sheets in `link/markers/`; `TOPICS.md` is the message contract (phases 7-8, see `link/README.md`)
 - `tests/`   `test_*.m` scripts and `run_all_tests.m`
+- `startup.m`, `SCALING.md`, `HANDOVER.md`, `FINAL_REPORT.md` (snapshot of 2026-11-22); the robot firmware is in `../firmware/zadp_bot` (`../firmware/README.md`)
 
 ## Start
 ```matlab
 run('E:\catrover_dumpautonomy\twin3d\startup.m')
-run_all_tests          % about 20 min (test_brain + test_maps are full fills); one test: test_bot, test_rules, ...
+run_all_tests          % all tests, several minutes (timing: HANDOVER.md section 11); one test: test_bot, test_rules, ...
 ```
 
 ## Physics vs visuals
@@ -40,5 +41,5 @@ Handover for a new session or the user: **`HANDOVER.md`** (architecture, functio
 | 4 | Brain (3 robots, zero collisions, no deadlock) | done |
 | 5 | Piles (parking, truck numbers, pile maths, coverage) | done |
 | 6 | 3D (scene, trucks, replay, live view, Simulink model, video) | done |
-| 7 | MQTT link | done up to real hardware, tested against `fake_bot.py` (no broker, no camera, no firmware yet) |
-| 8 | Real robots (firmware MQTT, broker, camera calibration, first hardware test) | open: `HANDOVER.md` section 14 |
+| 7 | MQTT link | done, tested against `fake_bot.py` (loopback) and with a built-in broker (`link/py/mini_broker.py`) |
+| 8 | Real robots (firmware, broker, camera calibration, hardware tests) | in progress: firmware built, robot 1 verified on the floor, bench build run as robots 2 and 3; camera, `run_real('real')` end to end and robots 2 and 3 with motors not yet verified; status and next steps in `HANDOVER.md` sections 13 and 14 |

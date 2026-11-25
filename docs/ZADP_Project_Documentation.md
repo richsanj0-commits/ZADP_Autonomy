@@ -363,7 +363,7 @@ These changes came out of testing and are useful for the paper's discussion:
 - **Lane mutex is conservative:** one moving truck in the lanes at a time is safe but limits throughput on very large areas; a convoy rule (same-direction following) would raise it.
 - **Text recognition:** works on clean drawings; unusual fonts may need values typed in.
 - **Baseline:** modelled as a fixed grid with 7.38 m gaps; real site layouts may differ.
-- **Next:** link to the rover prototype (the physical 2D test), curvature-aware isolation check, loader queues, and pile settlement.
+- **Next:** the rover prototype is now the digital twin and ESP32 firmware (`twin3d/HANDOVER.md`, `firmware/README.md`; open hardware steps in `twin3d/HANDOVER.md` section 14); curvature-aware isolation check, loader queues, and pile settlement.
 
 ---
 
@@ -381,7 +381,12 @@ These changes came out of testing and are useful for the paper's discussion:
 | `test_sketches/` | test sketches: 17 shapes + 5 practical sites |
 | `tools/make_test_sketches.py`, `tools/make_site_sketches.py` | generate the test sketches |
 | `tools/pipeline_test.js` | runs a sketch through all rounds from the browser console |
-| `test_results.md` | earlier result tables |
+| `docs/test_results.md` | earlier result tables (18 shapes) |
+| `docs/prototype/zadp_sim.py`, `docs/prototype/zadp_run.gif` | first Python prototype |
+| `docs/ZADP_Theorems_and_References.pdf`, `docs/ZADP_Hardware_Twin_Guide.pdf`, `docs/screenshots/` | theorems, hardware guide, screenshots |
+| `tools/` | plan export, screenshots, sketch and PDF generators (`tools/README.md`) |
+| `twin3d/` | MATLAB digital twin of the 3-robot arena (`twin3d/HANDOVER.md`) |
+| `firmware/zadp_bot/` | ESP32 FreeRTOS robot firmware (`firmware/README.md`) |
 | `docs/ZADP_Project_Documentation.md` | this document |
 
 ---

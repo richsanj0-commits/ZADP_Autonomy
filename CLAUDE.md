@@ -6,8 +6,10 @@
 - Start in `twin3d/HANDOVER.md` (architecture, functions, contracts, how to extend, next steps for the real robots). Then `twin3d/README.md`, `SCALING.md`, `brain/README.md`, `link/TOPICS.md`.
 
 ## Where things live
-- Web app: `zadp_game.html`, `vendor/`, `tools/` (`export_plan.py` makes plan JSON for the twin, `make_screenshots.py`, `pipeline_test.js`), `docs/`, `start.bat`.
-- Twin: `twin3d/` folders `params plan brain bot world3d simulink link tests`. All numbers: `twin3d/params/twin_params.m`.
+- Web app: `zadp_game.html`, `vendor/` (`vendor/README.md`), `test_sketches/`, `tools/` (`tools/README.md`: `export_plan.py` makes plan JSON for the twin, `make_screenshots.py`, `pipeline_test.js`), `start.bat`.
+- `docs/`: project documentation, problem statement, PDFs, `screenshots/`, `test_results.md` (earlier 18-shape table, superseded), `prototype/` (`zadp_sim.py` + `zadp_run.gif`, first Python prototype; run from that folder).
+- Twin: `twin3d/` folders `params plan maps brain bot world3d simulink link tests`. All numbers: `twin3d/params/twin_params.m`.
+- Firmware: `firmware/zadp_bot` (ESP32 FreeRTOS, PlatformIO envs in `platformio.ini`), guide `firmware/README.md`.
 
 ## Run and test
 - Web app: `start.bat` (Windows) or `python -m http.server 8765` in the repo root, open `http://localhost:8765/zadp_game.html` (never `file://`).

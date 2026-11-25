@@ -82,12 +82,14 @@ octagon), tested by `test_maps`; `maps\README.md`.
 - `link_open`, `link_send_cmd`, `link_poll`, `link_close` MATLAB side (base MATLAB `tcpclient`). `link_keepalive` = heartbeat to bridge.py (the bridge repeats each robot's last command at 10 Hz while MATLAB was heard within 1 s), `link_stop_all`. `run_real` = one-command launcher (real / dry), `link_write_config` = numbers for the Python side and the firmware check.
 - `link_from_brain(W, Wprev, L)` route-step changes to commands. `brain_run_linked` brain with the link, paced to real time, `opts.syncToReal`.
 - `link_launch`, `link_kill`, `link_python` start/stop and find the Python processes (PID checked).
+- `link_broker_status` does a broker answer on `P.mqtt.broker:P.mqtt.port`, and is that host this PC.
 - `py\bridge.py` TCP <-> MQTT (or loopback router). `py\fake_bot.py` stand-in for the ESP32s and camera. `py\transport.py` clients. `py\aruco_node.py` camera node (never run on a camera).
+- `py\mini_broker.py` dependency-free MQTT broker (started by `link_launch` when none runs). `py\bot_ping.py` prints robot telemetry (robot check without the twin). `py\bench_cam.py` camera stand-in for bench robots (`run_real('bench')`). `py\check_numbers.py` firmware `config.h` vs `link_config.json`. `py\test_aruco_geometry.py`, `py\test_mini_broker.py`, `py\test_bench_cam.py` Python tests. `markers\make_markers.py` printable markers (needs OpenCV). `demo_link` linked demo.
 
 **Repo root `firmware\zadp_bot\`** (ESP32 robot firmware, PlatformIO + arduino-esp32 core 2.0.17, FreeRTOS; details in
-`firmware\README.md`). Five pinned FreeRTOS tasks, no polling loop: `control` (core 1, prio 20, 200 Hz `vTaskDelayUntil`:
+`firmware\README.md`). Five pinned FreeRTOS tasks plus a sixth, `gyro`, no polling loop: `control` (core 1, prio 20, 200 Hz `vTaskDelayUntil`:
 PCNT encoders, odometry, camera fusion, go-to / turn laws, wheel PI, PWM, 300 ms command watchdog, 0.3 s link-loss stop),
-`telemetry` (core 0, prio 6, 20 Hz + at once on a new seq), `comms` (core 0, prio 5, WiFi + MQTT state machine with
+`gyro` (core 1, prio 10, 5 ms, only if an MPU6050 is found: I2C read, rate to atomics), `telemetry` (core 0, prio 6, 20 Hz + at once on a new seq), `comms` (core 0, prio 5, WiFi + MQTT state machine with
 backoff, JSON parsing), `console` (core 1, prio 2, serial bench self-test, boot stack report), `health` (core 1, prio 1,
 LED). Queues: `ctrlQ` (commands, FIFO), `camQ` and `snapQ` (length 1, overwrite). The task watchdog (1 s, reset) watches
 only the control task. The maths is `include\motion_core.h`, mirrored by `test\host\js_mirror\mirror_test.js`; its
@@ -185,12 +187,16 @@ Calls longer than about 60 s need a timer or slices (`opts.maxTime`), see `CLAUD
 | `test_bot` | one wheel turn = 2772 counts, straight and turn-around accuracy, speed and accel limits, odometry drifts without camera, camera keeps arrival error under 10 mm, camera latency modelled and compensated (bias under 2 mm), wheel travel independent of dt, controller never rotates in place inside the capture radius |
 | `test_piles` | pile formula vs plan radius, volume law, growth, truck numbers 1,2,3.. with no repeats, pile records complete, coverage maths, single parking source, monitors zero over 300 s |
 | `test_world3d` | 3D world handles, truck footprint and bed tilt, pile size, replay and live frames; Simulink model (built in a temp folder): stop time 600, annotation, Stop block, two 30 s runs in a row equal to each other and to `brain_run`, view block survives its figure being closed |
+| `test_firmware` | `config.h` numbers equal `twin_params` (`check_numbers.py`, incl. `TRACK_SCALE`), `motion_core.h` JS mirror (node), camera geometry (numpy) |
+| `test_run_real` | `run_real('dry')` on the full code path without hardware: 20 s dry run (monitors 0, every robot near its twin), robot off its slot, hidden corner, view closed, mixed `realBots`, broker mode on a private free port |
 | `test_link` | loopback mode only, time-based seq base, command reaches fake robot, payloads match `TOPICS.md` field for field, 30 s linked run error and latency, syncToReal, 300 ms watchdog, no processes left; SKIPs without Python |
 | `test_brain` | 3 seeds (`check_brain_run`): zero overlaps, pile hits, off-site, section-ownership violations, deadlocks, failed exit re-plans; normal end; piles within 15 mm of spot; at least 98 % filled; zone lock; lane spots last and alone; two robots inside at once |
 | `test_maps` | 400 s sim (seed 1) on the 4 arena shapes in `plan\` (arena, rect, lshape, hex) and the 4 in `maps\`: all monitors 0, zone lock, two robots inside at once, a pile in every zone; a self-intersecting site is refused with a clear message. Full fills of the 4 arena shapes: `demo_maps` -> `plan\maps_results.md` |
 | `test_rules` | 60 s section-ownership check; forced wait cycle and forced no-progress stall are each flagged once and end the run; `W.hold` holds and releases a robot |
 
-Last run: ALL TESTS PASSED in 445.1 s; `test_brain` 249 s, `test_maps` 76 s (8 maps x 400 s sim). Run the suite via a timer (a blocked MATLAB MCP call times out and interrupts it).
+Not in `run_all_tests` (run by hand): `python twin3d\link\py\test_mini_broker.py`, `python twin3d\link\py\test_bench_cam.py`, and the host build of `firmware\zadp_bot\test\host\test_motion_core.cpp` (`firmware\README.md` section 7).
+
+An earlier run (latest full run: `CLAUDE.md`): ALL TESTS PASSED in 445.1 s; `test_brain` 249 s, `test_maps` 76 s (8 maps x 400 s sim). Run the suite via a timer (a blocked MATLAB MCP call times out and interrupts it).
 
 ## 12. Measured results (verified runs)
 - Reference plan, seeds 1 / 2 / 3: 125 / 125 / 125 of 125 piles, sim time 2873 / 2881 / 2888 s, min robot gap 12.1 / 11.5 / 9.9 mm, min pile gap 5.3 / 3.4 / 4.4 mm, worst pile-to-spot error 6.3 / 5.4 / 6.4 mm, 0 exit re-plans.
@@ -208,7 +214,7 @@ Last run: ALL TESTS PASSED in 445.1 s; `test_brain` 249 s, `test_maps` 76 s (8 m
 - Odometry alone (camera off) drifts much faster than the 1 % slip suggests, because the left/right scale difference integrates into heading: about 1.7 % / 1.7 deg over 0.2 m, 6 % / 6 deg over 1 m, 13 % / 13 deg over 4 m (150 runs). The camera fix (gain 0.3) is what keeps arrival errors small.
 - Camera latency (50 ms) is modelled (`cam_measure` returns the pose of 50 ms ago) and compensated in `pose_fusion` with the odometry since the image time; uncompensated, the estimate would lag about 10 mm at cruise, more than the 7 mm pile clearance. The firmware must do the same (`link/TOPICS.md` checklist). `fake_bot.py` does the same.
 - `aruco_node.py` is written but has not been run against a camera (OpenCV is not installed); expect to tune it (no undistortion; the apron outside the four corner markers is extrapolated).
-- Firmware (`firmware/zadp_bot`), as of 2026-11-23: all 5 envs build with PlatformIO. Robot 1 is flashed and was verified on the floor over WiFi/MQTT through `mini_broker.py`: straight 0.2 m (+5161 / +5171 counts, arrived); left and right 90 degree turns (gyro heading +87.4 / -87.4 deg, arrived in 1.5 s); telemetry 19.3 Hz. Not yet verified: robots 2 and 3, a real camera and `aruco_node.py` (OpenCV not installed), `run_real('real')` end to end. `run_real('dry')` tests the same code path with loopback, fake robots and a simulated camera.
+- Firmware (`firmware/zadp_bot`), as of 2026-11-23: all 5 envs build with PlatformIO. Robot 1 is flashed and was verified on the floor over WiFi/MQTT through `mini_broker.py`: straight 0.2 m (+5161 / +5171 counts, arrived); left and right 90 degree turns (gyro heading +87.4 / -87.4 deg, arrived in 1.5 s); telemetry 19.3 Hz. Two bare ESP32 boards ran the bench build (`botN_bench`) as robots 2 and 3 under `run_real('bench')` on 2026-11-24 (300 s, 236 commands, every monitor 0). Not yet verified: robots 2 and 3 with motors, a real camera and `aruco_node.py` (OpenCV not installed), `run_real('real')` end to end. `run_real('dry')` tests the same code path with loopback, fake robots and a simulated camera.
 - A fixed parking bay per robot is NOT implemented: a rolling queue P3 -> P2 -> P1 is used (a fixed bay would need a wider apron and breaks the all-or-nothing section grants).
 - Lane (spine) spots are filled last, one truck at a time, deepest first; the others wait parked.
 - Three robots stand for an endless stream of trucks; truck numbers are labels, not separate robots.

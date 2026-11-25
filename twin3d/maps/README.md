@@ -1,7 +1,7 @@
 # maps: other site shapes for the twin
 
 Four more 1 x 1 m arena maps at the same 1:200 scale as `plan/plan_arena.json`, made with the web app's planner
-(`zadp_game.html`, rounds 1-4) through `tools/export_plan.py`. `test_maps` runs a full fill on each.
+(`zadp_game.html`, rounds 1-4) through `tools/export_plan.py`. `test_maps` runs 400 s of sim time (seed 1) on each, not a full fill.
 
 | Map | Site polygon (site metres, `<name>_site.json`) | Spots |
 |---|---|---|
@@ -23,11 +23,11 @@ The brain supports one map family, checked with a clear message by `brain/assert
 (x = 0.44 with the 24 m lane); exactly two zones, one each side of the spine, at most one branch each; inside the
 1 x 1 m arena; one truck type. All four maps here are in it. Anything else (paddocks with holes, an entry on another
 edge, three zones) needs layout work first: `HANDOVER.md` section 9.
-`test_maps` now runs 400 s of sim time on these four and on the four arena shapes in `plan/`; the table below is
-from the earlier full fills (before the non-convex change; not re-run).
+`test_maps` runs 400 s of sim time (8 maps: these four and the four arena shapes in `plan/`). The table below is an
+older result from full fills (before the non-convex change; not re-run).
 
-## Results
-`test_maps`, seed 1, every monitor 0 (robot-robot, pile, off-site, section ownership, deadlock):
+## Results (older full fills)
+Full fill, seed 1, every monitor 0 (robot-robot, pile, off-site, section ownership, deadlock):
 
 | Map | Piles | Sim time | Min robot gap | Min pile gap | Worst pile error |
 |---|---|---|---|---|---|

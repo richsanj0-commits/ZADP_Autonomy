@@ -1,7 +1,7 @@
 // main.cpp : ZADP truck robot (ESP32 DevKit, TB6612FNG, two quadrature encoders), FreeRTOS application.
 //
 // setup() forces the motors off, starts the encoders, probes the gyro (starts its task if found), creates the
-// queues / event group / mutex, configures the task watchdog and starts five pinned tasks (table in ../README.md,
+// queues / event group / mutex, configures the task watchdog and starts five pinned tasks plus a sixth, gyro, only if a gyro is found (table in ../../README.md,
 // numbers in include/config.h):
 //   control   core 1  prio CTRL_TASK_PRIO     CONTROL_HZ   encoders, odometry, fusion, laws, wheel PI, PWM, watchdogs
 //   telemetry core 0  prio TEL_TASK_PRIO      TELEMETRY_HZ + ack on new seq

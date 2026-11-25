@@ -142,7 +142,7 @@ the estimate by about 0.3 * v * D, i.e. the estimate's speed is scaled by roughl
 about 18 % slower). Poses and `arrived` stay self-consistent, only timing and encoder-vs-pose figures are biased.
 `netDelay` is shared with the real camera and is not tuned for this.
 
-## Decisions (firmware/README.md section 6 had 18 open points; all are resolved above)
+## Decisions (18 open points of an earlier firmware design; all are resolved above)
 1 watchdog scope: drive / turn phases only. 2 last will `offline`. 3 `stop` ends in `arrived` once stopped.
 4 unknown action: seq taken, command cancelled, `idle`. 5 missing fields: goto without x/y or turn without heading =
 unknown; goto without heading = line from the robot. 6 `speed` default and cap 0.20, goto floor 0.02. 7 turn

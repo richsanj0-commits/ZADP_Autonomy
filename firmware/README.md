@@ -7,11 +7,11 @@ Every twin number in `include/config.h` equals `twin3d/params/twin_params.m`; `t
 (run by MATLAB `test_firmware`) checks it.
 
 Status: robot 1 verified on the floor over WiFi / MQTT (built-in broker): straight 0.2 m, left 90 deg, right 90 deg
-all arrive. Robots 2 and 3: same build, not yet flashed.
+all arrive. Robots 2 and 3 with motors: not yet flashed or verified. Two bare ESP32 boards ran the bench build as robots 2 and 3 under `run_real('bench')` on 2026-11-24 (300 s, 236 commands, every monitor 0).
 
 ```
 firmware/zadp_bot/                PlatformIO project
-  platformio.ini                  envs bot1, bot2, bot3; bot1_pcb.. (BIN2 on GPIO 5); bot1_isr (GPIO-interrupt encoders)
+  platformio.ini                  envs botN, botN_pcb, botN_b, botN_bench, bot1_isr (table in section 1)
   include/config.h                every tunable (pins, geometry, gains, tolerances, topics, tasks); portable
   include/motion_core.h           all maths, portable C++ (odometry, wheel PI, laws, state machine, camera fusion)
   include/secrets.example.h       copy to include/secrets.h (WIFI_SSID, WIFI_PASS, MQTT_HOST); git-ignored
@@ -50,6 +50,18 @@ FreeRTOS: control 200 Hz (core 1 prio 20), telemetry 20 Hz, task watchdog 1000 m
 ```
 
 Then the help, and after 3 s the task stack report. Put ArUco marker id N on robot N (`twin3d/link/README.md`).
+
+Build variants (`platformio.ini`; N = 1..3, all set `BOT_ID`):
+
+| Env | Variant |
+|---|---|
+| `botN` | standard wiring (section 2), PCNT encoders; the gyro is detected at boot |
+| `botN_pcb` | PCB robots: BIN2 on GPIO 5 instead of 33 |
+| `botN_b` | wiring B: PWMA 13, AIN2 12, AIN1 14, BIN1 26, BIN2 25, PWMB 33 (`include/config.h`) |
+| `bot1_isr` | GPIO-interrupt encoder decoder instead of PCNT (fallback; `-DENC_USE_PCNT=0`) |
+| `botN_bench` | bench build `-DBENCH_SIM=1`: a bare ESP32 (no driver, encoders, gyro) acts as a moving robot; motors, encoders and gyro are simulated at the lowest layer, everything above is the real code. Its status message carries `"bench":true`. Used by `run_real('bench')` (`twin3d/link/README.md`) |
+
+Built by the lead (2026-11-23/24): `bot1`, `bot2_b`, `bot2_bench`, `bot3_bench`. The other envs were not built in this check. On the floor: `bot1` (robot 1). On the bench: `bot2_bench`, `bot3_bench`.
 
 ## 2. Robot 1 hardware (the micromouse build, same pins on every robot)
 
@@ -100,6 +112,8 @@ Topics (`twin3d/link/TOPICS.md`): subscribes `zadp/botN/cmd` (QoS 1) and `zadp/c
 ```
 {"id":2,"fw":"Nov 23 2026 12:00:00","reset":"brownout","gyro":false,"ip":"192.168.1.42","rssi":-58}
 ```
+
+A bench build adds `"bench":true` to this message.
 
 `reset` is `esp_reset_reason()`: `poweron`, `external pin`, `software`, `panic`, `interrupt watchdog`,
 `task watchdog`, `other watchdog`, `brownout`, ... Being retained, it explains the last reboot without USB:

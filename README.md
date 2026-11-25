@@ -22,13 +22,22 @@ then open `http://localhost:8765/zadp_game.html`. Works offline: the text reader
 
 Round 1 also offers 5 sample sketches with known dimensions.
 
+## Repository map
+
+- `zadp_game.html`, `vendor/` — the web app and its bundled libraries (`vendor/README.md`)
+- `test_sketches/` — test sketches (made by `tools/make_test_sketches.py`, `tools/make_site_sketches.py`); also the app's sample sketches in Round 1
+- `docs/` — project documentation (`ZADP_Project_Documentation.md`), problem statement, theorems PDF (`ZADP_Theorems_and_References.pdf`), hardware guide PDF (`ZADP_Hardware_Twin_Guide.pdf`), `screenshots/`
+- `tools/` — plan export, screenshots, sketch and PDF generators, browser test helper (`tools/README.md`)
+- `twin3d/` — MATLAB digital twin with 3 robots (start in `twin3d/HANDOVER.md`)
+- `firmware/zadp_bot` — ESP32 FreeRTOS robot firmware (`firmware/README.md`)
+
 ## Files
 
 - `zadp_game.html` — the whole app
-- `test_sketches/` — test sketches (made by `tools/make_test_sketches.py`)
+- `test_sketches/` — test sketches
 - `tools/pipeline_test.js` — runs a sketch through all rounds in the browser console
-- `test_results.md` — results on 18 shapes
-- `zadp_sim.py`, `zadp_run.gif` — first Python prototype
+- `docs/test_results.md` — earlier results on 18 shapes (superseded by `docs/ZADP_Project_Documentation.md`)
+- `docs/prototype/zadp_sim.py`, `docs/prototype/zadp_run.gif` — first Python prototype; run it from `docs/prototype/` (`python zadp_sim.py --gif` writes `zadp_run.gif` into the current folder)
 
 ## 3D digital twin (supporting hardware)
 

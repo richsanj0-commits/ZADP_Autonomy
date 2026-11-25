@@ -1,5 +1,7 @@
 # Final report: twin audit, maps, hardware integration, RTOS firmware
 
+Snapshot of 2026-11-22. Later state: HANDOVER.md sections 12 to 14, firmware/README.md, CLAUDE.md.
+
 Date: 2026-11-22. Numbers below were measured in the runs named; nothing is estimated.
 
 ## 1. Test status
@@ -71,7 +73,7 @@ Open, not changed: the collision check and the route grid treat a truck as a dis
 
 ## 7. Not verified
 
-- The firmware has never been built by PlatformIO or run on an ESP32. It was syntax-checked with the ESP32 compiler (104 compiles, 0 errors) against stand-in headers for the two MQTT/JSON libraries. The first `pio run -e bot1` needs internet once.
-- No real MQTT broker and no camera were used. OpenCV is not installed on this PC, so ArUco detection was never run and the marker sheets are not generated.
+- At the time of this report the firmware had only been syntax-checked with the ESP32 compiler (104 compiles, 0 errors) against stand-in headers for the two MQTT/JSON libraries. Since then (see `HANDOVER.md` sections 12 to 14): the firmware builds with PlatformIO; robot 1 was flashed and driven on the floor over WiFi/MQTT through `mini_broker.py` on 2026-11-23; two bare ESP32 boards ran the bench build as robots 2 and 3 under `run_real('bench')` on 2026-11-24 (300 s, 236 commands, every monitor 0).
+- Still not verified: a real camera and ArUco detection (OpenCV is not installed on this PC, so `aruco_node.py` was never run and the marker sheets are not generated), `run_real('real')` end to end, robots 2 and 3 with motors.
 - New maps were filled with seed 1 only.
 - Pages 5 and 7 of the guide PDF were not checked visually.

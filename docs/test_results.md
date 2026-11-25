@@ -1,3 +1,5 @@
+Earlier 18-shape table, superseded by `ZADP_Project_Documentation.md` for current numbers.
+
 # ZADP Dump Planner — test results
 
 Fleet: Big hauler (363 t, pile r 6.35 m, 15.1 × 9.75 m, 2 trucks) + Small hauler (227 t, pile r 4.00 m, 12.9 × 7.6 m, 3 trucks).
