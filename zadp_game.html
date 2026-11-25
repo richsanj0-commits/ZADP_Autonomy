@@ -14,13 +14,13 @@
     color-scheme: dark;
 
     /* Core palette (all original tokens preserved) */
-    --bg: #0c1116;
-    --panel: #131b23;
-    --panel2: #19232e;
-    --line: #273544;
-    --line-strong: #374a5e;
+    --bg: #0b1015;
+    --panel: #111820;
+    --panel2: #17212b;
+    --line: #253342;
+    --line-strong: #35485c;
     --text: #e6edf3;
-    --muted: #93a4b6;
+    --muted: #8fa2b5;
     --accent: #f5a623;
     --accent2: #3fb68b;
     --danger: #f0655d;
@@ -28,25 +28,37 @@
     --area: #c9a46b;
     --front: #6cb6ff;
 
-    /* Surfaces & semantic tints */
-    --surface: #0e141a;
-    --control: #212e3b;
-    --control-hover: #2a3949;
+    /* Surfaces, states & semantic tints */
+    --surface: #0d1319;
+    --surface-hover: #141d26;
+    --control: #1e2a36;
+    --control-hover: #273645;
+    --accent-hover: #f9b545;
     --accent-soft: rgba(245, 166, 35, 0.14);
+    --accent-ring: rgba(245, 166, 35, 0.28);
+    --accent2-hover: #4bc89b;
     --accent2-soft: rgba(63, 182, 139, 0.14);
+    --accent2-border: rgba(63, 182, 139, 0.42);
     --danger-soft: rgba(240, 101, 93, 0.14);
-    --danger-text: #ff867e;
+    --danger-border: rgba(240, 101, 93, 0.38);
+    --danger-text: #ff8c85;
 
-    /* Spacing, radii & motion */
+    /* Typography */
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+
+    /* Spacing, radii, shadows & motion */
     --s-2: 8px;
     --s-3: 12px;
+    --r-xs: 4px;
     --r-sm: 6px;
     --r-md: 8px;
     --r-lg: 10px;
     --r-pill: 999px;
     --ease: 150ms cubic-bezier(0.2, 0, 0, 1);
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
-    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.36);
+    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.48);
+    --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.62);
   }
 
   *, *::before, *::after { box-sizing: border-box; }
@@ -71,8 +83,9 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 13.5px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font: 13px/1.48 var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     height: 100vh;
     height: 100dvh;
     display: flex;
@@ -80,38 +93,41 @@
     overflow: hidden;
   }
 
-  /* ==================== HEADER & ROUND STEPPER ==================== */
+  /* ==================== HEADER & 5-ROUND STEPPER ==================== */
   header {
     display: flex;
     align-items: center;
-    gap: 12px 14px;
-    padding: 10px 16px;
-    background: linear-gradient(180deg, #161f29 0%, var(--panel) 100%);
+    gap: 10px 14px;
+    padding: 9px 16px;
+    background: linear-gradient(180deg, #16202a 0%, var(--panel) 100%);
     border-bottom: 1px solid var(--line);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 4px 16px rgba(0, 0, 0, 0.28);
     flex-wrap: wrap;
     z-index: 30;
   }
 
   header h1 {
-    font-size: 15px;
+    font-size: 14.5px;
     font-weight: 700;
     margin: 0;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.03em;
+    color: var(--text);
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     white-space: nowrap;
   }
 
   header h1 span {
-    color: #11161c;
-    background: var(--accent);
+    color: #0e1318;
+    background: linear-gradient(180deg, #f9b545 0%, var(--accent) 100%);
     padding: 2px 7px;
-    border-radius: var(--r-sm);
-    font-size: 12px;
+    border-radius: var(--r-xs);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
     font-weight: 800;
     letter-spacing: 0.08em;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   }
 
   .units {
@@ -125,41 +141,83 @@
 
   #demoSite {
     width: auto;
-    min-width: 156px;
-    max-width: 210px;
-    height: 32px;
+    min-width: 150px;
+    max-width: 204px;
+    height: 31px;
+    font-size: 12px;
+    padding: 4px 8px;
   }
 
   #demoBtn {
-    height: 32px;
+    height: 31px;
     padding: 0 12px;
+    font-size: 12px;
     white-space: nowrap;
   }
 
-  /* Stepper bar in header */
+  /* Stepper track with CSS-only numbered badges & connectors */
+  nav.rounds,
   .rounds {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 14px;
     margin-left: auto;
-    padding: 3px;
+    padding: 4px 6px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-pill);
-    flex-wrap: wrap;
+    counter-reset: round-step;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
   }
 
   .rounds button {
     position: relative;
+    counter-increment: round-step;
     border-radius: var(--r-pill);
     font-size: 12px;
     font-weight: 500;
-    padding: 5px 12px;
+    padding: 4px 11px 4px 6px;
     background: transparent;
     border: 1px solid transparent;
     color: var(--muted);
     white-space: nowrap;
+    gap: 6px;
     transition: background var(--ease), color var(--ease), border-color var(--ease), box-shadow var(--ease);
+  }
+
+  /* Step number circle (upcoming state) */
+  .rounds button::before {
+    content: counter(round-step);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+    background: var(--panel2);
+    border: 1px solid var(--line-strong);
+    color: var(--muted);
+    flex-shrink: 0;
+    transition: background var(--ease), color var(--ease), border-color var(--ease);
+  }
+
+  /* Connector line between steps */
+  .rounds button:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: calc(100% + 3px);
+    top: 50%;
+    width: 10px;
+    height: 2px;
+    transform: translateY(-50%);
+    background: var(--line-strong);
+    border-radius: 1px;
+    pointer-events: none;
+    transition: background var(--ease);
   }
 
   .rounds button:hover:not(:disabled) {
@@ -168,28 +226,66 @@
     color: var(--text);
   }
 
+  .rounds button:hover:not(:disabled)::before {
+    border-color: var(--muted);
+    color: var(--text);
+  }
+
+  /* Done state */
   .rounds button.done {
-    color: var(--accent2);
+    color: #9de2c8;
     background: var(--accent2-soft);
-    border-color: rgba(63, 182, 139, 0.35);
+    border-color: var(--accent2-border);
   }
 
   .rounds button.done::before {
-    content: "✓ ";
-    font-weight: 700;
+    content: "\2713";
+    font-family: var(--font-sans);
+    background: var(--accent2);
+    border-color: var(--accent2);
+    color: #051810;
+    font-weight: 800;
   }
 
+  .rounds button.done:not(:last-child)::after {
+    background: rgba(63, 182, 139, 0.7);
+  }
+
+  .rounds button.done:hover:not(:disabled) {
+    background: rgba(63, 182, 139, 0.22);
+    border-color: var(--accent2);
+    color: #c5f3e1;
+  }
+
+  /* Current active state */
   .rounds button.on,
   .rounds button.done.on {
     background: var(--accent);
-    color: #101418;
+    color: #0e1318;
     border-color: var(--accent);
     font-weight: 700;
-    box-shadow: 0 0 0 1px rgba(245, 166, 35, 0.25), 0 2px 10px rgba(245, 166, 35, 0.28);
+    box-shadow: 0 0 0 1px var(--accent-ring), 0 2px 10px rgba(245, 166, 35, 0.28);
   }
 
+  .rounds button.on::before,
   .rounds button.done.on::before {
-    content: "";
+    content: counter(round-step);
+    font-family: var(--font-mono);
+    background: #0e1318;
+    border-color: #0e1318;
+    color: var(--accent);
+  }
+
+  .rounds button.on:not(:last-child)::after,
+  .rounds button.done.on:not(:last-child)::after {
+    background: linear-gradient(90deg, var(--accent), var(--line-strong));
+  }
+
+  .rounds button.on:hover:not(:disabled),
+  .rounds button.done.on:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: #0e1318;
   }
 
   /* ==================== MAIN LAYOUT & SIDEBAR ==================== */
@@ -215,27 +311,27 @@
   }
 
   section.card {
-    background: var(--panel2);
+    background: linear-gradient(180deg, #192430 0%, var(--panel2) 100%);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
     padding: var(--s-3);
     margin-bottom: var(--s-3);
-    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.03);
-    overflow-x: auto;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    overflow-x: hidden;
   }
 
   section.card h2 {
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 700;
     margin: 0 0 10px;
-    padding-bottom: 7px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
     text-transform: uppercase;
     letter-spacing: 0.09em;
     color: var(--accent);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
   }
 
   section.card h2::before {
@@ -244,16 +340,25 @@
     height: 12px;
     border-radius: 2px;
     background: var(--accent);
+    box-shadow: 0 0 6px rgba(245, 166, 35, 0.45);
     flex-shrink: 0;
   }
 
   section.card h3 {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10.5px;
+    font-weight: 700;
     margin: 14px 0 6px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.08em;
+  }
+
+  section.card h2 + h3 {
+    margin-top: 4px;
+    padding-top: 0;
+    border-top: 0;
   }
 
   /* ==================== CONTROLS & BUTTONS ==================== */
@@ -265,6 +370,7 @@
     padding: 7px 11px;
     cursor: pointer;
     font: inherit;
+    font-size: 12.5px;
     font-weight: 500;
     line-height: 1.25;
     display: inline-flex;
@@ -285,14 +391,14 @@
 
   button.on {
     background: var(--accent);
-    color: #101418;
+    color: #0e1318;
     border-color: var(--accent);
     font-weight: 600;
   }
 
   button.on:hover:not(:disabled) {
-    background: #f9b545;
-    border-color: #f9b545;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
   }
 
   button.primary {
@@ -300,30 +406,32 @@
     color: #051810;
     border-color: var(--accent2);
     font-weight: 700;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 
   button.primary:hover:not(:disabled) {
-    background: #4bc89b;
-    border-color: #4bc89b;
-    box-shadow: 0 2px 10px rgba(63, 182, 139, 0.25);
+    background: var(--accent2-hover);
+    border-color: var(--accent2-hover);
+    box-shadow: 0 2px 12px rgba(63, 182, 139, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.28);
   }
 
   button.danger {
     color: var(--danger-text);
     background: var(--danger-soft);
-    border-color: rgba(240, 101, 93, 0.35);
+    border-color: var(--danger-border);
   }
 
   button.danger:hover:not(:disabled) {
     background: rgba(240, 101, 93, 0.24);
     border-color: var(--danger);
-    color: #ffd0cd;
+    color: #ffd3d0;
   }
 
   button:disabled {
-    opacity: 0.42;
+    opacity: 0.4;
     cursor: not-allowed;
     transform: none;
+    box-shadow: none;
   }
 
   /* Focus-visible rings */
@@ -336,25 +444,28 @@
     outline-offset: 2px;
   }
 
-  /* Segmented tabs */
+  /* Segmented controls */
   .tabs {
     display: flex;
-    gap: 4px;
+    gap: 3px;
     padding: 3px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
     margin-bottom: 8px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 
   .tabs button {
     flex: 1;
-    padding: 5px 8px;
+    padding: 5px 7px;
     font-size: 12px;
+    font-weight: 500;
     background: transparent;
     border-color: transparent;
     color: var(--muted);
     border-radius: var(--r-sm);
+    min-width: 0;
   }
 
   .tabs button:hover:not(:disabled) {
@@ -365,8 +476,10 @@
 
   .tabs button.on {
     background: var(--accent);
-    color: #101418;
+    color: #0e1318;
     border-color: var(--accent);
+    font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   }
 
   #methodTabs {
@@ -375,19 +488,26 @@
     gap: 4px;
   }
 
-  /* Form rows & inputs */
+  #speedTabs button {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  /* ==================== FORM ROWS & INPUTS ==================== */
   .row {
     display: flex;
     gap: 8px;
     align-items: center;
     margin: 7px 0;
+    min-width: 0;
   }
 
   .row label {
     flex: 1;
     min-width: 0;
     color: var(--muted);
-    font-size: 13px;
+    font-size: 12.5px;
+    line-height: 1.35;
   }
 
   .row label:has(input[type=checkbox]) {
@@ -400,26 +520,31 @@
   }
 
   .row .u {
-    min-width: 34px;
+    min-width: 30px;
     width: auto;
     color: var(--muted);
-    font-size: 11.5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
     text-align: right;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
   }
 
   input[type=number],
   input[type=text],
   select {
-    width: 108px;
+    width: 100px;
+    max-width: 100%;
     background: var(--surface);
     color: var(--text);
     border: 1px solid var(--line);
     border-radius: var(--r-sm);
-    padding: 6px 8px;
+    padding: 5px 8px;
     font: inherit;
+    font-size: 12.5px;
     font-variant-numeric: tabular-nums;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
     transition: border-color var(--ease), background var(--ease), box-shadow var(--ease);
   }
 
@@ -427,14 +552,19 @@
   input[type=text]:hover:not(:disabled),
   select:hover:not(:disabled) {
     border-color: var(--line-strong);
+    background: var(--surface-hover);
   }
 
   input[type=number]:focus,
   input[type=text]:focus,
   select:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-soft);
+    box-shadow: 0 0 0 2px var(--accent-soft), inset 0 1px 2px rgba(0, 0, 0, 0.35);
     outline: none;
+  }
+
+  input::placeholder {
+    color: #5d7084;
   }
 
   input:disabled,
@@ -445,13 +575,55 @@
 
   input[type=text] { width: 100%; }
   select.wide { width: 100%; }
-  #c_seq { width: 152px; }
+  #c_seq { width: 148px; }
 
   input[type=range] {
-    flex: 1.2;
-    min-width: 90px;
+    flex: 1.25;
+    min-width: 84px;
+    height: 20px;
+    background: transparent;
     accent-color: var(--accent);
     cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: var(--r-pill);
+    background: var(--line-strong);
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid #0e1318;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+    transition: transform var(--ease), background var(--ease);
+  }
+
+  input[type=range]:hover::-webkit-slider-thumb {
+    background: var(--accent-hover);
+    transform: scale(1.1);
+  }
+
+  input[type=range]::-moz-range-track {
+    height: 4px;
+    border-radius: var(--r-pill);
+    background: var(--line-strong);
+  }
+
+  input[type=range]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid #0e1318;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
   }
 
   input[type=checkbox] {
@@ -460,22 +632,23 @@
     height: 15px;
     margin: 0;
     cursor: pointer;
+    flex-shrink: 0;
   }
 
-  /* ==================== TEXT, FORMULAS, STATS ==================== */
+  /* ==================== TEXT, FORMULAS & STATS ==================== */
   .hint {
     color: var(--muted);
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 11.5px;
+    line-height: 1.48;
     margin: 6px 0 0;
   }
   .hint:empty { display: none; }
   .hint b { color: var(--text); font-weight: 600; }
 
   .formula {
-    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
-    font-size: 11.5px;
-    line-height: 1.5;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.55;
     background: var(--surface);
     border: 1px solid var(--line);
     border-left: 3px solid var(--accent2);
@@ -489,14 +662,20 @@
 
   .stats {
     display: grid;
-    grid-template-columns: minmax(112px, 44%) 1fr;
+    grid-template-columns: minmax(108px, 46%) minmax(0, 1fr);
     gap: 5px 10px;
     margin-top: 8px;
-    font-size: 12.5px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 12px;
     font-variant-numeric: tabular-nums;
     align-items: baseline;
   }
-  .stats:empty { display: none; }
+  .stats:empty {
+    display: none;
+    padding-top: 0;
+    border-top: 0;
+  }
 
   .stats div:nth-child(odd) {
     color: var(--muted);
@@ -505,32 +684,35 @@
   .stats div:nth-child(even) {
     text-align: right;
     color: var(--text);
-    word-break: break-word;
+    overflow-wrap: break-word;
   }
 
-  .ok, .stats .ok { color: var(--accent2); }
-  .bad, .stats .bad { color: var(--danger-text); }
-  .warn, .stats .warn { color: var(--accent); }
+  .ok, .stats .ok { color: var(--accent2); font-weight: 600; }
+  .bad, .stats .bad { color: var(--danger-text); font-weight: 600; }
+  .warn, .stats .warn { color: var(--accent); font-weight: 600; }
+
   .stats > .bad {
     grid-column: 1 / -1;
     text-align: left;
     background: var(--danger-soft);
-    border: 1px solid rgba(240, 101, 93, 0.35);
+    border: 1px solid var(--danger-border);
     border-radius: var(--r-sm);
     padding: 6px 8px;
     margin-top: 4px;
+    font-weight: 500;
   }
 
   /* ==================== UPLOAD, SAMPLES & PROGRESS ==================== */
   .drop {
     display: block;
-    background: var(--surface);
+    background: linear-gradient(180deg, rgba(13, 19, 25, 0.9) 0%, rgba(17, 24, 32, 0.9) 100%);
     border: 1.5px dashed var(--line-strong);
     border-radius: var(--r-lg);
-    padding: 18px 12px;
+    padding: 16px 12px;
     text-align: center;
     color: var(--muted);
-    font-size: 12.5px;
+    font-size: 12px;
+    line-height: 1.45;
     cursor: pointer;
     transition: border-color var(--ease), background var(--ease), color var(--ease), box-shadow var(--ease);
   }
@@ -546,8 +728,9 @@
 
   .drop b {
     color: var(--text);
+    font-size: 12.5px;
     display: inline-block;
-    margin-bottom: 2px;
+    margin-bottom: 3px;
   }
 
   .samples {
@@ -566,11 +749,13 @@
     border: 1px solid var(--line);
     border-radius: var(--r-md);
     text-align: center;
+    min-width: 0;
   }
 
   .samples button:hover:not(:disabled) {
     border-color: var(--accent);
     background: var(--control);
+    box-shadow: var(--shadow-sm);
   }
 
   .samples img {
@@ -578,14 +763,15 @@
     height: 44px;
     object-fit: contain;
     display: block;
-    background: #ffffff;
-    border-radius: 4px;
+    background: #f4f6f8;
+    border-radius: var(--r-xs);
     padding: 2px;
   }
 
   .samples span {
     display: block;
-    font-size: 10.5px;
+    font-size: 10px;
+    font-weight: 500;
     line-height: 1.25;
     color: var(--text);
     overflow: hidden;
@@ -594,7 +780,7 @@
   }
 
   .progress {
-    height: 5px;
+    height: 6px;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-pill);
@@ -606,11 +792,11 @@
     display: block;
     height: 100%;
     width: 0;
-    background: linear-gradient(90deg, var(--accent) 0%, #ffc45c 100%);
+    background: linear-gradient(90deg, var(--accent) 0%, #ffc864 100%);
     transition: width 220ms ease;
   }
 
-  /* ==================== TABLES, TAGS, CHIPS, DETAILS ==================== */
+  /* ==================== SIDEBAR TABLES (NEVER OVERFLOW 372px) ==================== */
   .zlegend {
     display: flex;
     flex-wrap: wrap;
@@ -620,43 +806,70 @@
     margin-bottom: 8px;
   }
 
-  .ztable {
+  .zlegend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .ztable,
+  .dims {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
-    font-size: 11.5px;
     font-variant-numeric: tabular-nums;
+  }
+
+  .ztable {
+    font-size: 11px;
+    line-height: 1.3;
   }
 
   .ztable th,
   .ztable td {
-    padding: 5px 5px;
-    border-bottom: 1px solid rgba(39, 53, 68, 0.75);
+    padding: 5px 3px;
+    border-bottom: 1px solid rgba(37, 51, 66, 0.8);
     text-align: left;
     vertical-align: middle;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   .ztable th {
     color: var(--muted);
-    font-weight: 600;
-    font-size: 10.5px;
+    font-weight: 700;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    background: rgba(14, 20, 26, 0.55);
+    background: rgba(13, 19, 25, 0.72);
+    white-space: nowrap;
   }
 
-  .ztable tr:hover td {
-    background: rgba(255, 255, 255, 0.03);
-  }
+  .ztable tr:last-child td { border-bottom: 0; }
+  .ztable tr:hover td { background: rgba(255, 255, 255, 0.03); }
+
+  /* Zone status table column budgets (fit within 313px card interior) */
+  #zoneTable th:nth-child(1), #zoneTable td:nth-child(1) { width: 34px; }
+  #zoneTable th:nth-child(2), #zoneTable td:nth-child(2) { width: 31%; }
+  #zoneTable th:nth-child(3), #zoneTable td:nth-child(3) { width: 29%; }
+  #zoneTable th:nth-child(4), #zoneTable td:nth-child(4) { width: 36px; text-align: right; }
+  #zoneTable th:nth-child(5), #zoneTable td:nth-child(5) { width: 48px; text-align: right; white-space: nowrap; }
+
+  /* Truck status table column budgets */
+  #truckTable th:nth-child(1), #truckTable td:nth-child(1) { width: 36px; }
+  #truckTable th:nth-child(2), #truckTable td:nth-child(2) { width: 30%; }
+  #truckTable th:nth-child(3), #truckTable td:nth-child(3) { width: auto; }
+  #truckTable th:nth-child(4), #truckTable td:nth-child(4) { width: 42px; text-align: right; }
 
   .ztable .bar {
-    height: 6px;
+    display: block;
+    width: 100%;
+    height: 4px;
     background: var(--surface);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: var(--r-pill);
     overflow: hidden;
-    width: 48px;
-    display: inline-block;
-    vertical-align: middle;
-    margin-right: 4px;
+    margin: 0 0 3px;
   }
 
   .ztable .bar i {
@@ -667,43 +880,48 @@
 
   .zdot {
     display: inline-block;
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    margin-right: 5px;
+    margin-right: 4px;
     vertical-align: middle;
+    flex-shrink: 0;
   }
 
   .dims {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
+    font-size: 11.5px;
+    line-height: 1.3;
     margin: 4px 0;
   }
 
   .dims td,
   .dims th {
-    padding: 5px 4px;
-    border-bottom: 1px solid rgba(39, 53, 68, 0.75);
+    padding: 5px 3px;
+    border-bottom: 1px solid rgba(37, 51, 66, 0.8);
     text-align: left;
     vertical-align: middle;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
+
+  .dims tr:last-child td { border-bottom: 0; }
 
   .dims td.n {
     font-weight: 600;
-    min-width: 52px;
+    color: var(--text);
   }
 
   .dims td.u {
     color: var(--muted);
-    font-size: 11px;
+    font-size: 10.5px;
+    font-family: var(--font-mono);
   }
 
   .dims input {
-    width: 62px;
-    padding: 4px 6px;
-    font-size: 12px;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 5px;
+    font-size: 11.5px;
   }
 
   .dims tr:hover td {
@@ -711,7 +929,7 @@
   }
 
   .dims tr.sel td {
-    background: rgba(245, 166, 35, 0.14);
+    background: var(--accent-soft);
     color: var(--text);
   }
 
@@ -719,17 +937,70 @@
     box-shadow: inset 2px 0 0 var(--accent);
   }
 
+  /* Round 1 dimension table column budgets */
+  #dimTable td:nth-child(1) { width: 58px; }
+  #dimTable td:nth-child(2) { width: 66px; }
+  #dimTable td:nth-child(3) { width: 18px; text-align: center; }
+  #dimTable td:nth-child(4) { width: auto; }
+  #dimTable td:nth-child(5) { width: 46px; text-align: right; }
+
+  /* Round 4 hex grid table column budgets & header styling */
+  #gridTable tr:first-child td,
+  #cmpBox .dims tr:first-child td {
+    color: var(--muted);
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: rgba(13, 19, 25, 0.72);
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  #gridTable td:nth-child(1) { width: 72px; }
+  #gridTable td:nth-child(2) { width: 38px; text-align: right; }
+  #gridTable td:nth-child(3) { width: 56px; }
+  #gridTable td:nth-child(4) { width: 74px; text-align: right; }
+  #gridTable td:nth-child(5) { width: 66px; text-align: right; }
+  #gridTable input { width: 100% !important; min-width: 0; padding: 4px 5px; }
+  #gridTable tr:last-child td[colspan] {
+    width: auto;
+    text-align: left;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--muted);
+    padding-top: 7px;
+  }
+
+  /* Round 5 comparison table column budgets */
+  #cmpBox .dims {
+    margin-top: 8px;
+    font-size: 11px;
+  }
+  #cmpBox .dims td:nth-child(1) { width: auto; }
+  #cmpBox .dims td:nth-child(2) { width: 40px; text-align: right; }
+  #cmpBox .dims td:nth-child(3) { width: 48px; text-align: right; }
+  #cmpBox .dims td:nth-child(4) { width: 40px; text-align: right; }
+  #cmpBox .dims td:nth-child(5) { width: 34px; text-align: right; }
+  #cmpBox .dims td:nth-child(6) { width: 38px; text-align: right; }
+
+  /* ==================== TAGS, CHIPS & DETAILS ==================== */
   .tag {
     display: inline-block;
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 600;
-    line-height: 1.2;
+    line-height: 1.25;
     padding: 2px 6px;
     border-radius: var(--r-pill);
     border: 1px solid currentColor;
-    background: rgba(255, 255, 255, 0.03);
-    white-space: nowrap;
+    background: rgba(255, 255, 255, 0.04);
+    max-width: 100%;
+    white-space: normal;
   }
+
+  .tag.ok { background: var(--accent2-soft); }
+  .tag.warn { background: var(--accent-soft); }
+  .tag.bad { background: var(--danger-soft); }
 
   .chips {
     display: flex;
@@ -741,23 +1012,27 @@
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
-    padding: 4px 6px;
-    font-size: 12px;
+    padding: 4px 7px;
+    font-size: 11.5px;
+    font-family: var(--font-mono);
     display: inline-flex;
     gap: 6px;
     align-items: center;
+    max-width: 100%;
   }
 
   .chip select {
     width: auto;
-    padding: 2px 6px;
-    font-size: 11.5px;
+    max-width: 130px;
+    padding: 2px 5px;
+    font-family: var(--font-sans);
+    font-size: 11px;
   }
 
   details {
-    margin-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-    padding-top: 6px;
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 8px;
   }
 
   details summary {
@@ -773,82 +1048,462 @@
     color: var(--text);
   }
 
+  details[open] summary {
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
   /* ==================== STAGE & CANVAS OVERLAYS ==================== */
   #stage {
     flex: 1;
     position: relative;
     min-width: 0;
-    background: var(--bg);
+    background: radial-gradient(circle at 50% 40%, #101720 0%, var(--bg) 75%);
     overflow: hidden;
   }
-  #cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
 
-  #viewTabs { position: absolute; top: 12px; right: 12px; display: flex; gap: 4px; z-index: 12; padding: 3px;
-              background: rgba(14, 20, 26, 0.9); border: 1px solid var(--line); border-radius: var(--r-md); }
-  #viewTabs button { padding: 5px 10px; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
-  #viewTabs button.on { background: var(--accent); color: #101418; border-color: var(--accent); }
+  #cv {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: crosshair;
+  }
 
-  /* the banner sits left of the view tabs so a long message never runs under them */
-  #banner { position: absolute; top: 12px; left: 12px; max-width: calc(100% - 300px); z-index: 10;
-            background: rgba(19, 27, 35, 0.94); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent);
-            padding: 7px 14px; border-radius: var(--r-md); font-size: 13px; pointer-events: none; box-shadow: var(--shadow-sm); }
+  #viewTabs {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 3px;
+    z-index: 12;
+    padding: 3px;
+    background: rgba(13, 19, 25, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-sm);
+  }
+
+  #viewTabs button {
+    padding: 5px 10px;
+    font-size: 12px;
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    border-radius: var(--r-sm);
+  }
+
+  #viewTabs button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: transparent;
+    color: var(--text);
+  }
+
+  #viewTabs button.on {
+    background: var(--accent);
+    color: #0e1318;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+
+  /* Banner stays clear of #viewTabs on the right */
+  #banner {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    max-width: calc(100% - 280px);
+    z-index: 10;
+    background: rgba(17, 24, 32, 0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--accent);
+    padding: 7px 14px;
+    border-radius: var(--r-md);
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--text);
+    pointer-events: none;
+    box-shadow: var(--shadow-md);
+  }
   #banner:empty { display: none; }
 
-  #caption { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(720px, 92%); z-index: 20;
-             background: rgba(12, 17, 22, 0.96); border: 1px solid var(--accent); border-left-width: 4px; border-radius: var(--r-lg);
-             padding: 12px 16px; font-size: 15px; line-height: 1.5; box-shadow: var(--shadow-lg); cursor: pointer; }
-  #caption b { color: var(--accent); }
-  #caption .step { color: var(--muted); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; }
+  #caption {
+    position: absolute;
+    left: 50%;
+    bottom: 76px;
+    transform: translateX(-50%);
+    width: min(720px, 92%);
+    z-index: 20;
+    background: rgba(11, 16, 21, 0.94);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(245, 166, 35, 0.7);
+    border-left: 4px solid var(--accent);
+    border-radius: var(--r-lg);
+    padding: 13px 18px;
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--text);
+    box-shadow: var(--shadow-lg);
+    cursor: pointer;
+    transition: border-color var(--ease), box-shadow var(--ease);
+  }
 
-  .legend { position: absolute; bottom: 12px; left: 12px; max-width: calc(100% - 24px); z-index: 8;
-            background: rgba(19, 27, 35, 0.92); border: 1px solid var(--line); border-radius: var(--r-md);
-            padding: 6px 10px; font-size: 11.5px; color: var(--muted); display: flex; gap: 4px 12px; flex-wrap: wrap; box-shadow: var(--shadow-sm); }
+  #caption:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-lg), 0 0 0 1px var(--accent-ring);
+  }
+
+  #caption b { color: var(--accent); font-weight: 700; }
+
+  #caption .step {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+
+  .legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+    z-index: 8;
+    background: rgba(17, 24, 32, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    padding: 6px 11px;
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px 14px;
+    flex-wrap: wrap;
+    box-shadow: var(--shadow-sm);
+  }
   .legend:empty { display: none; }
-  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .sw {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    vertical-align: -1px;
+    margin-right: 5px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+    flex-shrink: 0;
+  }
 
   /* ==================== FLEET VIEW (ROUND 2) ==================== */
-  /* bottom padding keeps the last table rows clear of the demo caption */
-  #fleetView { position: absolute; inset: 0; overflow: auto; padding: 16px 16px 120px; display: none; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-  .tcard { background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 10px; cursor: pointer;
-           box-shadow: var(--shadow-sm); transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease); }
-  .tcard:hover { border-color: var(--line-strong); transform: translateY(-1px); }
-  .tcard.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); }
-  .tcard h4 { margin: 0 0 2px; font-size: 14px; }
-  .tcard .sub { color: var(--muted); font-size: 12px; }
-  .tcard canvas { width: 100%; height: auto; aspect-ratio: 500 / 260; display: block; margin: 6px 0; background: var(--surface); border-radius: var(--r-sm); }
-  table.fleet { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12.5px; font-variant-numeric: tabular-nums;
-                background: var(--panel2); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
-  table.fleet th, table.fleet td { border-bottom: 1px solid var(--line); padding: 7px 10px; text-align: right; white-space: nowrap; }
-  table.fleet th:first-child, table.fleet td:first-child { text-align: left; }
-  table.fleet th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; background: rgba(14, 20, 26, 0.55); }
-  table.fleet tr:last-child td { border-bottom: 0; }
-  table.fleet tr:hover td { background: rgba(255, 255, 255, 0.03); }
-  tr.gov td { color: var(--accent); }
-  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  /* Bottom clearance keeps the last rows above #caption during demo */
+  #fleetView {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    padding: 18px 20px 128px;
+    display: none;
+  }
 
-  .lib { display: flex; flex-direction: column; gap: 4px; max-height: 150px; overflow-y: auto; }
-  .lib:empty::after { content: "No saved areas yet"; color: var(--muted); font-size: 12px; }
-  .lib div { display: flex; gap: 6px; align-items: center; font-size: 12px; padding: 2px 0; }
-  .lib div span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lib button { padding: 3px 8px; font-size: 12px; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(256px, 1fr));
+    gap: 14px;
+  }
+
+  .tcard {
+    background: linear-gradient(180deg, #192430 0%, var(--panel2) 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    padding: 12px;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+  }
+
+  .tcard:hover {
+    border-color: var(--line-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .tcard.on {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 6px 20px rgba(245, 166, 35, 0.14);
+  }
+
+  .tcard h4 {
+    margin: 0 0 3px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .tcard .sub {
+    color: var(--muted);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tcard canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 500 / 260;
+    display: block;
+    margin: 8px 0 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+  }
+
+  .tcard .stats {
+    margin-top: 6px;
+    padding-top: 6px;
+  }
+
+  table.fleet {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 18px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+
+  table.fleet th,
+  table.fleet td {
+    border-bottom: 1px solid var(--line);
+    padding: 8px 10px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  table.fleet th:first-child,
+  table.fleet td:first-child {
+    text-align: left;
+    font-weight: 600;
+  }
+
+  table.fleet th {
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: rgba(13, 19, 25, 0.72);
+  }
+
+  table.fleet tr:last-child td { border-bottom: 0; }
+  table.fleet tbody tr:hover td { background: rgba(255, 255, 255, 0.03); }
+
+  tr.gov td {
+    color: var(--accent);
+    background: rgba(245, 166, 35, 0.06);
+    font-weight: 600;
+  }
+
+  tr.gov td:first-child {
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  .empty {
+    color: var(--muted);
+    margin: 36px auto;
+    max-width: 440px;
+    padding: 40px 24px;
+    text-align: center;
+    background: var(--panel);
+    border: 1.5px dashed var(--line-strong);
+    border-radius: var(--r-lg);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .empty b { color: var(--accent); }
+
+  /* ==================== SAVED AREAS LIBRARY ==================== */
+  .lib {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 164px;
+    overflow-y: auto;
+  }
+
+  .lib:empty::after {
+    content: "No saved areas yet";
+    display: block;
+    color: var(--muted);
+    font-size: 11.5px;
+    padding: 10px 8px;
+    text-align: center;
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: var(--r-sm);
+  }
+
+  .lib > .hint {
+    margin: 0;
+    padding: 10px 8px;
+    text-align: center;
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: var(--r-sm);
+  }
+
+  .lib div {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    font-size: 12px;
+    padding: 5px 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    transition: border-color var(--ease);
+  }
+
+  .lib div:hover {
+    border-color: var(--line-strong);
+  }
+
+  .lib div span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lib button {
+    padding: 3px 8px;
+    font-size: 11.5px;
+    flex-shrink: 0;
+  }
 
   /* ==================== RESPONSIVE ==================== */
-  @media (max-width: 1080px) { aside { width: 320px; } .units { display: none; } .rounds { margin-left: 0; border-radius: var(--r-lg); } }
-  @media (max-width: 760px) {
-    body { height: auto; min-height: 100dvh; overflow: auto; }
-    main { flex-direction: column; } aside { width: auto; max-height: 50vh; border-right: 0; border-bottom: 1px solid var(--line); }
-    #stage { min-height: 60vh; } #banner { max-width: calc(100% - 24px); } #viewTabs { top: auto; bottom: 52px; }
+  @media (max-width: 1080px) {
+    aside {
+      width: 328px;
+      padding: 10px;
+    }
+
+    section.card {
+      padding: 10px;
+    }
+
+    .units {
+      display: none;
+    }
+
+    nav.rounds,
+    .rounds {
+      flex: 1 1 100%;
+      margin-left: 0;
+      border-radius: var(--r-lg);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .rounds::-webkit-scrollbar {
+      display: none;
+    }
   }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  @media (max-width: 760px) {
+    body {
+      height: auto;
+      min-height: 100dvh;
+      overflow: auto;
+    }
+
+    header {
+      padding: 8px 12px;
+      gap: 8px 10px;
+    }
+
+    nav.rounds,
+    .rounds {
+      flex-wrap: wrap;
+      gap: 6px;
+      overflow-x: visible;
+    }
+
+    .rounds button:not(:last-child)::after {
+      display: none;
+    }
+
+    main {
+      flex-direction: column;
+    }
+
+    aside {
+      width: 100%;
+      max-height: 52vh;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    #stage {
+      min-height: 62vh;
+    }
+
+    #banner {
+      max-width: calc(100% - 24px);
+    }
+
+    #viewTabs {
+      top: auto;
+      bottom: 52px;
+    }
+
+    #caption {
+      bottom: 64px;
+      padding: 10px 14px;
+      font-size: 13.5px;
+    }
+
+    #fleetView {
+      padding: 14px 12px 110px;
+    }
+  }
+
+  /* ==================== REDUCED MOTION ==================== */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1><span>ZADP</span> Dump Planner</h1>
   <span class="units">Units everywhere: metres · tonnes · m³ · degrees · seconds</span>
-  <select id="demoSite" title="Site for the demo" aria-label="Site for the demo"></select><button id="demoBtn" class="primary">▶ Demo for judges</button>
-  <nav class="rounds" aria-label="Rounds">
+  <select id="demoSite" title="Site for the demo" aria-label="Site for the demo"></select><button id="demoBtn" class="primary" title="Run the guided 5-round demonstration on the selected sample site">Demo for judges</button>
+  <nav class="rounds" aria-label="Planning rounds">
     <button data-round="1" class="on">Round 1 · Dump area</button>
     <button data-round="2">Round 2 · Fleet</button>
     <button data-round="3">Round 3 · Safe boundary</button>
@@ -870,7 +1525,7 @@
         <p class="hint" id="progMsg"></p>
         <div id="pickBox" hidden>
           <p class="hint">Lines in the drawing split it into several closed regions. Click each region that is part of the dump area (orange), then confirm.</p>
-          <div class="row"><button class="primary" id="useSel" style="flex:1">✓ Use selected regions</button></div>
+          <div class="row"><button class="primary" id="useSel" style="flex:1">Use selected regions</button></div>
         </div>
       </section>
 
@@ -882,17 +1537,17 @@
         <div class="row" style="margin-top:8px"><button class="primary" id="buildBtn" style="flex:1">Build shape from dimensions</button></div>
         <p class="hint" id="buildMsg"></p>
         <details><summary>Corners detected wrong?</summary>
-          <div class="row"><label>Corner detail</label><input type="range" id="detail" min="0.4" max="5" step="0.1" value="1.2"><span id="detailVal" class="u"></span></div>
+          <div class="row"><label for="detail">Corner detail</label><input type="range" id="detail" min="0.4" max="5" step="0.1" value="1.2"><span id="detailVal" class="u"></span></div>
           <p class="hint">Fewer or more corners. Re-reads the dimensions afterwards.</p>
         </details>
       </section>
 
       <section class="card" id="saveCard" hidden>
         <h2>3 · Entry &amp; save</h2>
-        <div class="row"><button id="entryBtn" style="flex:1">📍 Set entry point</button></div>
+        <div class="row"><button id="entryBtn" style="flex:1" title="Click, then select a point on the boundary where trucks enter">Set entry point</button></div>
         <p class="hint">Click the button, then click the boundary where trucks enter.</p>
-        <div class="row"><input type="text" id="areaName" placeholder="Area name, e.g. North paddock"></div>
-        <div class="row"><button class="primary" id="saveArea" style="flex:1">💾 Save area &amp; go to Round 2</button></div>
+        <div class="row"><input type="text" id="areaName" aria-label="Dump area name" placeholder="Area name, e.g. North paddock"></div>
+        <div class="row"><button class="primary" id="saveArea" style="flex:1">Save area &amp; go to Round 2</button></div>
         <div class="stats" id="stats1"></div>
       </section>
 
@@ -909,7 +1564,7 @@
         <p class="hint">Add each truck type that works in this dump area. Each one needs 4 inputs: payload, number of trucks, pile radius and size.</p>
         <div class="row"><button id="addTruck" style="flex:1">+ Add truck type</button></div>
         <div class="stats" id="stats2"></div>
-        <div class="row"><label>Lane width (each of 2 lanes)</label><input type="number" id="laneW" step="0.1" min="0" placeholder="auto"><span class="u">m</span></div>
+        <div class="row"><label for="laneW">Lane width (each of 2 lanes)</label><input type="number" id="laneW" step="0.1" min="0" placeholder="auto"><span class="u">m</span></div>
         <p class="hint">Site setting: one lane in, one lane out, from the entry to the back. Empty = widest truck + 1 m.</p>
       </section>
       <div id="truckForm"></div>
@@ -926,9 +1581,9 @@
       <section class="card">
         <h2>Boustrophedon partition</h2>
         <p class="hint">A sweep line crosses the safe zone. At every <b>critical point</b> (a corner where the shape's width changes) it cuts a new cell, so each cell is a simple strip without notches. Cells deeper than one <b>bay</b> are cut again into bays. A bay = one branch road with piles on both sides, sized from the trucks: one truck works one bay half at a time.</p>
-        <div class="row"><label>Sweep direction</label><input type="range" id="sweep" min="0" max="179" step="1" value="0"><span id="sweepVal" class="u" style="width:40px"></span></div>
+        <div class="row"><label for="sweep">Sweep direction</label><input type="range" id="sweep" min="0" max="179" step="1" value="0"><span id="sweepVal" class="u" style="width:40px"></span></div>
         <div class="row"><button id="alignEntry" style="flex:1">Along the entry</button><button id="bestAngle" style="flex:1">Fewest cells</button></div>
-        <div class="row"><label>Pile rows each side of a branch</label><input type="number" id="rowsIn" min="1" max="12" step="1" value="3"><span class="u"></span></div>
+        <div class="row"><label for="rowsIn">Pile rows each side of a branch</label><input type="number" id="rowsIn" min="1" max="12" step="1" value="3"><span class="u"></span></div>
         <div class="stats" id="stats3c"></div>
         <div class="row"><button class="primary" id="toR4" style="flex:1">Go to Round 4 →</button></div>
       </section>
@@ -939,7 +1594,7 @@
       <section class="card">
         <h2>Entry, spine and branches</h2>
         <p class="hint">The <b>spine</b> is the main two-way road (IN + OUT) from the entry along the sweep direction to the back. Each bay half gets a temporary one-truck <b>branch</b> road off the spine. Branches and spine are filled last, deepest part first — like water rising.</p>
-        <div class="row"><button id="entryBtn3" style="flex:1">📍 Choose entry side</button><button id="bestEntry" style="flex:1">✨ Best entry</button></div>
+        <div class="row"><button id="entryBtn3" style="flex:1" title="Click, then select a boundary edge where trucks enter">Set entry side</button><button id="bestEntry" style="flex:1" title="Test candidate entry edges with full dispatch runs and keep the best safe result">Best entry</button></div>
         <p class="hint">Best entry runs the full dispatch from the current entry and the 4 longest edges and keeps the best run with no collision or deadlock (takes 1–5 min on big sites; in tests up to +7 points).</p>
         <div class="stats" id="stats4z"></div>
       </section>
@@ -950,7 +1605,7 @@
         <div class="row"><button id="gap0" style="flex:1">Touching (0 m)</button><button id="gapHuman" style="flex:1">Human-like overlap (−2 m)</button></div>
         <p class="hint">Human operators place piles closer than their size, so neighbouring piles merge. Overlap packs more: in tests 0 m ≈ 77 %, −1 m ≈ 87 %, −2 m ≈ 94 % of the dump area.</p>
         <div class="row"><label><input type="checkbox" id="showNums" checked> Show fill order numbers</label></div>
-        <div class="row"><button id="exportPlan" style="flex:1">Export plan for 3D twin</button></div>
+        <div class="row"><button id="exportPlan" style="flex:1" title="Download the scaled plan JSON (1:200 for a 1 m × 1 m arena)">Export plan for 3D twin</button></div>
         <p class="hint">Writes the plan for the 1 m × 1 m twin arena at 1:200, so the site must fit in 200 × 200 m.</p>
       </section>
       <section class="card">
@@ -965,14 +1620,14 @@
     <div id="aside5" hidden>
       <section class="card">
         <h2>Dispatch method</h2>
-        <div class="tabs" id="methodTabs" style="flex-wrap:wrap"><button data-m="base">Baseline</button><button data-m="staff">Staffed 3.03 m</button><button data-m="stag">Staggered</button><button data-m="radial">Radial</button><button data-m="grid">Grid + remove</button><button data-m="touch">Touching</button></div>
+        <div class="tabs" id="methodTabs" role="group" aria-label="Dispatch method" style="flex-wrap:wrap"><button data-m="base">Baseline</button><button data-m="staff">Staffed 3.03 m</button><button data-m="stag">Staggered</button><button data-m="radial">Radial</button><button data-m="grid">Grid + remove</button><button data-m="touch">Touching</button></div>
         <p class="hint"><b>Baseline</b>: today's autonomous practice, fixed spot points with 7.38 m between piles. <b>Staffed 3.03 m</b>: the same grid at the staffed spacing from the problem statement. <b>Staggered / Radial</b>: the alternative spot patterns from the problem statement (7.38 m). <b>Grid + remove</b>: the smallest truck's hex grid; a bigger pile cancels the grid spots it covers. <b>Touching</b>: each pile goes as deep as possible, touching piles already there.<br>
         All methods use the same checks: spot free · zone not locked (Rule 2) · truck can drive there and back (one-way lanes, Rule 1) · lane filled last, deepest first.</p>
       </section>
       <section class="card">
         <h2>Run</h2>
-        <div class="row"><button id="playBtn" style="flex:1">▶ Play</button><button id="resetBtn">⟲ Reset</button><button id="endBtn" title="Run to the end instantly">⏭ End</button></div>
-        <div class="tabs" id="speedTabs"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="3">3×</button><button data-s="4">4×</button><button data-s="10">10×</button></div>
+        <div class="row"><button id="playBtn" class="primary" style="flex:1" title="Start or pause the live dispatch simulation">▶ Play</button><button id="resetBtn" title="Reset the simulation clock and clear placed piles">Reset</button><button id="endBtn" title="Run the simulation to the end immediately">End</button></div>
+        <div class="tabs" id="speedTabs" role="group" aria-label="Simulation speed"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="3">3×</button><button data-s="4">4×</button><button data-s="10">10×</button></div>
         <p class="hint">1× = 1 minute of site time per second.</p>
         <div class="stats" id="stats5"></div>
       </section>
@@ -992,27 +1647,27 @@
       </section>
       <section class="card">
         <h2>Settings</h2>
-        <div class="row"><label>Speed in dump area</label><input type="number" id="c_kmh" value="20" step="1"><span class="u">km/h</span></div>
-        <div class="row"><label>Manoeuvre / spot time</label><input type="number" id="c_tMan" value="60" step="5"><span class="u">s</span></div>
-        <div class="row"><label>Dump time</label><input type="number" id="c_tDump" value="60" step="5"><span class="u">s</span></div>
-        <div class="row"><label>Haul cycle (load + travel)</label><input type="number" id="c_cycle" value="15" step="1"><span class="u">min</span></div>
-        <div class="row"><label>Truck order at the gate</label><select id="c_seq"><option value="mixed">Random mix (fleet loop)</option><option value="bigFirst">Big trucks first</option><option value="smallFirst">Small trucks first</option><option value="alternate">Alternate sizes</option></select></div>
-        <div class="row"><label>First trucks leave the pit every</label><input type="number" id="c_every" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label for="c_kmh">Speed in dump area</label><input type="number" id="c_kmh" value="20" step="1"><span class="u">km/h</span></div>
+        <div class="row"><label for="c_tMan">Manoeuvre / spot time</label><input type="number" id="c_tMan" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label for="c_tDump">Dump time</label><input type="number" id="c_tDump" value="60" step="5"><span class="u">s</span></div>
+        <div class="row"><label for="c_cycle">Haul cycle (load + travel)</label><input type="number" id="c_cycle" value="15" step="1"><span class="u">min</span></div>
+        <div class="row"><label for="c_seq">Truck order at the gate</label><select id="c_seq"><option value="mixed">Random mix (fleet loop)</option><option value="bigFirst">Big trucks first</option><option value="smallFirst">Small trucks first</option><option value="alternate">Alternate sizes</option></select></div>
+        <div class="row"><label for="c_every">First trucks leave the pit every</label><input type="number" id="c_every" value="60" step="5"><span class="u">s</span></div>
         <p class="hint">Only the trucks entered in Round 2 operate. Each one keeps looping: haul a load, dump, drive back to the loader, come back.</p>
-        <div class="row"><label>Max trucks inside (Rule 3)</label><input type="number" id="c_maxIn" placeholder="= zones" step="1"><span class="u"></span></div>
-        <div class="row"><label>Random seed (truck order)</label><input type="number" id="c_seed" value="7" step="1"><span class="u"></span></div>
+        <div class="row"><label for="c_maxIn">Max trucks inside (Rule 3)</label><input type="number" id="c_maxIn" placeholder="= zones" step="1"><span class="u"></span></div>
+        <div class="row"><label for="c_seed">Random seed (truck order)</label><input type="number" id="c_seed" value="7" step="1"><span class="u"></span></div>
         <div class="row"><button id="applyCfg" style="flex:1">Apply &amp; reset</button></div>
       </section>
     </div>
   </aside>
 
   <div id="stage">
-    <canvas id="cv"></canvas>
+    <canvas id="cv" role="img" aria-label="Dump area planning canvas"></canvas>
     <div id="fleetView"></div>
     <div id="banner" role="status" aria-live="polite">Upload a sketch of the dump area with its dimensions</div>
-    <div id="viewTabs" hidden><button id="vSketch" class="on">Sketch analysis</button><button id="vReal">Real shape (m)</button></div>
-    <div class="legend" id="legend"></div>
-    <div id="caption" hidden></div>
+    <div id="viewTabs" role="group" aria-label="Canvas view mode" hidden><button id="vSketch" class="on">Sketch analysis</button><button id="vReal">Real shape (m)</button></div>
+    <div class="legend" id="legend" role="region" aria-label="Map legend"></div>
+    <div id="caption" role="status" aria-live="polite" title="Click to dismiss" hidden></div>
   </div>
 </main>
 
@@ -1864,16 +2519,16 @@ function drawTruckCard(c, t, k, maxDim) {
   const g = c.getContext("2d"), W = c.width, H = c.height; g.clearRect(0, 0, W, H);
   if (!k.ok) return;
   const s = Math.min((W - 30) / maxDim, (H - 40) / Math.max(2 * k.r, t.W, 1) * 0.9), cy = H / 2 - 6, x0 = 15;
-  g.fillStyle = "#f5a62333"; g.strokeStyle = "#f5a623"; g.lineWidth = 2;
+  g.fillStyle = "rgba(245, 166, 35, 0.22)"; g.strokeStyle = "#f5a623"; g.lineWidth = 2.5;
   g.fillRect(x0, cy - t.W * s / 2, t.L * s, t.W * s); g.strokeRect(x0, cy - t.W * s / 2, t.L * s, t.W * s);
   g.fillStyle = "#f5a623"; g.fillRect(x0, cy - t.W * s / 2, t.L * s * 0.22, t.W * s * 0.45);
-  g.font = "18px system-ui"; g.fillStyle = "#e6edf3"; g.fillText(`truck ${f(t.L, 1)} × ${f(t.W, 1)} m`, x0, cy - t.W * s / 2 - 8);
+  g.font = "600 17px system-ui, sans-serif"; g.fillStyle = "#e6edf3"; g.fillText(`truck ${f(t.L, 1)} × ${f(t.W, 1)} m`, x0, cy - t.W * s / 2 - 8);
   const px = x0 + t.L * s + k.r * s + 2 * s;
-  g.beginPath(); g.arc(px, cy, k.r * s, 0, Math.PI * 2); g.fillStyle = "#c9a46b55"; g.fill(); g.strokeStyle = "#c9a46b"; g.stroke();
+  g.beginPath(); g.arc(px, cy, k.r * s, 0, Math.PI * 2); g.fillStyle = "rgba(201, 164, 107, 0.34)"; g.fill(); g.strokeStyle = "#c9a46b"; g.stroke();
   g.beginPath(); g.moveTo(px, cy); g.lineTo(px + k.r * s, cy); g.stroke();
   g.fillStyle = "#e6edf3"; g.fillText(`r = ${f(k.r, 2)} m`, px - k.r * s * 0.7, cy - 8);
-  g.strokeStyle = "#8b9bab"; g.lineWidth = 3; g.beginPath(); g.moveTo(15, H - 10); g.lineTo(15 + 5 * s, H - 10); g.stroke();
-  g.fillStyle = "#8b9bab"; g.font = "16px system-ui"; g.fillText("5 m", 20 + 5 * s, H - 4);
+  g.strokeStyle = "#9fb1c4"; g.lineWidth = 3; g.beginPath(); g.moveTo(15, H - 10); g.lineTo(15 + 5 * s, H - 10); g.stroke();
+  g.fillStyle = "#9fb1c4"; g.font = "600 15px ui-monospace, Consolas, monospace"; g.fillText("5 m", 20 + 5 * s, H - 4);
 }
 function truckFormHTML(t) {
   const k = calc(t), m = k.mat;
@@ -3362,7 +4017,7 @@ function setRound(r) {
   const no = t => { if (S.round === 2) { render2(); $("stats2").insertAdjacentHTML("beforeend", `<div class="bad">${t}</div><div></div>`); } banner(t); };   // #banner is hidden in Round 2
   if (bestRunning) return no("Best entry is still testing entries — wait for it to finish");
   if (r >= 2 && !S.areaSaved) return no("Build and save the dump area in Round 1 first");
-  if (r >= 2 && S.round === 1 && S.poly && S.poly !== S.areaSaved.polygon) return no("This shape is not saved yet — press 💾 Save, or load a saved area");
+  if (r >= 2 && S.round === 1 && S.poly && S.poly !== S.areaSaved.polygon) return no("This shape is not saved yet — press Save area, or load a saved area");
   if (r >= 3 && (!S.fleet.length || !S.fleet.every(t => calc(t).ok))) return no("Complete the fleet in Round 2 first");
   // later rounds always work on the saved shape, with an entry that belongs to it
   if (r >= 2 && S.poly !== S.areaSaved.polygon) { S.poly = S.areaSaved.polygon; S.entry = S.areaSaved.entry; invalidatePlan(); }
@@ -3455,11 +4110,11 @@ function pathOf(p, map = W2S, close = true) { ctx.beginPath(); p.forEach((q, i) 
 function drawGrid(r) {
   const raw = 60 / view.s, pow = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 5, 10].map(k => k * pow).find(v => v >= raw);
   const [wx0, wy1] = S2W(0, 0), [wx1, wy0] = S2W(r.width, r.height);
-  ctx.lineWidth = 1; ctx.font = "11px system-ui"; ctx.fillStyle = "#5c6b7a"; ctx.strokeStyle = "#1c2630";
+  ctx.lineWidth = 1; ctx.font = "500 11px ui-monospace, SFMono-Regular, Consolas, monospace"; ctx.fillStyle = "#7c90a4"; ctx.strokeStyle = "rgba(53, 72, 92, 0.36)";
   for (let x = Math.ceil(wx0 / step) * step; x <= wx1; x += step) { const [X] = W2S([x, 0]); ctx.beginPath(); ctx.moveTo(X, 0); ctx.lineTo(X, r.height); ctx.stroke(); ctx.fillText(+x.toFixed(3) + " m", X + 3, r.height - 6); }
   for (let y = Math.ceil(wy0 / step) * step; y <= wy1; y += step) { const [, Y] = W2S([0, y]); ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(r.width, Y); ctx.stroke(); ctx.fillText(+y.toFixed(3) + " m", 4, Y - 3); }
 }
-function label(text, X, Y, bg, fg = "#0f1419") {
+function label(text, X, Y, bg, fg = "#0b1015") {
   ctx.font = "bold 12px system-ui"; const w = ctx.measureText(text).width + 10;
   ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(X - w / 2, Y - 10, w, 20, 6); ctx.fill(); ctx.fillStyle = fg; ctx.textAlign = "center"; ctx.fillText(text, X, Y + 4); ctx.textAlign = "left";
 }

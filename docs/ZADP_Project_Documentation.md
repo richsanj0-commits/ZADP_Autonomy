@@ -371,7 +371,7 @@ These changes came out of testing and are useful for the paper's discussion:
 
 - Windows: double-click `start.bat` (needs Python). Or run `python -m http.server 8765` in the project folder and open `http://localhost:8765/zadp_game.html`.
 - Do not open the HTML file directly (the text reader cannot start from a `file://` page).
-- **Demo for judges:** choose a site in the header and press **▶ Demo for judges**. It runs all five rounds with a caption at each step and ends with the three-method comparison.
+- **Demo for judges:** choose a site in the header and press **Demo for judges**. It runs all five rounds with a caption at each step and ends with the three-method comparison.
 
 ### Files
 | File | What it is |
