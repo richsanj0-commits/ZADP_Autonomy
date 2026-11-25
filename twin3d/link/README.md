@@ -32,6 +32,24 @@ Launch order: `../HANDOVER.md` section 14.
 robots (no camera of their own, `--truth`), `aruco_node.py --sim` (true poses through a synthetic pinhole camera into
 marker corner pixels + 0.3 px noise, then the real homography / pose code); `realBots` works the same.
 
+## Bench mode (bare ESP32 boards, no camera)
+```matlab
+R = run_real('bench', struct('realBots', [2 3]));   % boards 2 and 3 on the broker, robot 1 simulated by fake_bot.py
+```
+For boards flashed with the bench build (`pio run -e bot2_bench -t upload`, `-DBENCH_SIM=1`: real tasks / WiFi / MQTT /
+control, motors and encoders simulated on the chip). Same as `'real'` (broker mode, `fake_bot.py` for the other robots)
+except the camera: `py/bench_cam.py` replaces `aruco_node.py` (no OpenCV, no corner markers). It republishes each
+bench robot's own telemetry pose as `zadp/cam/pose` in the `aruco_node.py` format (same `pose_message()`), at most
+`P.cam.rateHz` per robot and only for a NEW telemetry message (telemetry is 20 Hz, so about 20 poses/s).
+Start pose: a board keeps its odometry pose from earlier commands and an echo cannot move it, so before the echo
+`bench_cam.py` publishes the parking-slot pose of each bench robot as camera fixes (the firmware's "robot moved by
+hand" relock, no firmware change) until the telemetry shows the slot (within a tenth of `P.link.parkTol` /
+`parkTolDeg`); then it logs `bench ready`, `run_real` continues and its parking check passes. Never use it with robots
+on the floor: it refuses (exit 2, nothing published) any robot whose retained status lacks `"bench":true` (option
+`benchUnflagged` / `--allow-unflagged` for older bench firmware), `realBots` must be given explicitly, and a board that
+restarts mid-run ends the run (`ERROR robot N restarted`). Known small timing bias of the echo: TOPICS.md "Bench mode". Alone: `python link\py\bench_cam.py --broker 127.0.0.1:1883 --robots 2,3 --slot 2=0.75,-0.159,3.1416
+--slot 3=0.9,-0.159,3.1416`.
+
 ## Broker (Mosquitto optional)
 `py/mini_broker.py`: MQTT 3.1.1 broker, Python standard library only (clean sessions, QoS 0/1, + and # wildcards,
 retained messages, last will, keep-alive 1.5 x, client id takeover, per-client send queue). `link_launch` in broker
@@ -53,18 +71,20 @@ test_run_real      % run_real('dry'); robot off its slot; hidden corner; view cl
 test_firmware      % config.h vs twin_params, motion_core JS mirror (node), camera geometry (numpy)
 demo_link
 ```
-`python link\py\test_mini_broker.py` (broker, free port). Tests never use `P.mqtt.port`: loopback, or broker mode on a
+`python link\py\test_mini_broker.py` (broker, free port). `python link\py\test_bench_cam.py` (bench camera: private
+broker, two fake robots with the firmware's camera gate: relock / blend to the slots, echo, formats, rate). Tests never use `P.mqtt.port`: loopback, or broker mode on a
 private free port (`test_run_real` g), so they never publish where a real robot listens.
 
 ## Files
 | File | What |
 |---|---|
 | `TOPICS.md` | the contract |
-| `run_real.m` | one-command launcher (real / dry) |
+| `run_real.m` | one-command launcher (real / dry / bench) |
 | `link_write_config.m` | twin_params -> `link_config.json` |
 | `py/bridge.py` | localhost TCP <-> broker (paho-mqtt) or in-process loopback router; repeats each robot's last command at `P.link.repeatHz` while MATLAB was heard within `P.link.hostTimeout` |
 | `py/fake_bot.py` | reference robot: the firmware's command semantics and controller on the twin's motor model; optional camera / truth publisher; `--real` ids refused |
 | `py/aruco_node.py` | camera node: DICT_4X4_50, robots 1-3, corners 10-13, homography, parallax, axle offset, `t` + `age`; `--sim` mode; `--robots` limits the published ids |
+| `py/bench_cam.py` | bench camera: bench robots' telemetry pose republished as `zadp/cam/pose` (aruco_node format) after putting them on their parking slots; `run_real('bench')` |
 | `py/test_aruco_geometry.py` | camera geometry on synthetic pixels (numpy only) |
 | `py/check_numbers.py` | firmware `config.h` vs `link_config.json` |
 | `py/transport.py` | the two clients (TCP to the bridge, paho to a broker) |

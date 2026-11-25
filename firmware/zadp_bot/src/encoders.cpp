@@ -16,6 +16,59 @@
 #include "config.h"
 #include "hw.h"
 
+#if BENCH_SIM
+// ================================================================================================ bench build
+// No PCNT, no interrupts, no pins. Each wheel is a first-order lag on the speed the PWM would give:
+//   target = sign(pwm) * max(0, |pwm| - PWM_DEADBAND) / PWM_PER_MPS   (m/s, + = forward, as the real encoders count)
+//   v' = (target - v) / BENCH_MOTOR_TAU_S
+// Integrated exactly over the real elapsed time (esp_timer) since the last read, with the PWM held constant over
+// that time (the control task calls every 5 ms): distance = target*dt + (v0 - target)*tau*(1 - e^(-dt/tau)).
+// Counts = distance * CPR_x / (pi * WHEEL_DIAMETER_M), kept as a double (fractional counts are not lost), output
+// rounded. ENC_x_DIR is not applied: the real code applies it to raw counts to get forward positive, and this model
+// already works in forward-positive counts.
+#include <esp_timer.h>
+#include <math.h>
+
+namespace hw {
+
+static double benchV[2] = {0.0, 0.0};        // simulated wheel speed, m/s
+static double benchCounts[2] = {0.0, 0.0};   // cumulative counts, forward positive
+static int64_t benchLastUs = 0;
+
+void encodersBegin() {
+    benchV[0] = benchV[1] = 0.0;
+    benchCounts[0] = benchCounts[1] = 0.0;
+    benchLastUs = esp_timer_get_time();
+}
+
+void encodersRead(int32_t& l, int32_t& r) {
+    const int64_t now = esp_timer_get_time();
+    double dt = (double)(now - benchLastUs) * 1e-6;
+    benchLastUs = now;
+    if (dt < 0.0) dt = 0.0;
+    if (dt > (double)BENCH_MAX_STEP_S) dt = (double)BENCH_MAX_STEP_S;   // rule: a stalled task is not one huge step
+    const double tau = (double)BENCH_MOTOR_TAU_S;
+    const double decay = exp(-dt / tau);
+    const double cpm[2] = {(double)CPR_LEFT / (M_PI * (double)WHEEL_DIAMETER_M),
+                           (double)CPR_RIGHT / (M_PI * (double)WHEEL_DIAMETER_M)};
+    for (int w = 0; w < 2; w++) {
+        const int pwm = benchWheelPwm(w == 0);
+        const double mag = fabs((double)pwm) - (double)PWM_DEADBAND;
+        double target = mag > 0.0 ? mag / (double)PWM_PER_MPS : 0.0;
+        if (pwm < 0) target = -target;
+        benchCounts[w] += (target * dt + (benchV[w] - target) * tau * (1.0 - decay)) * cpm[w];
+        benchV[w] = target + (benchV[w] - target) * decay;
+    }
+    l = (int32_t)llround(benchCounts[0]);
+    r = (int32_t)llround(benchCounts[1]);
+}
+
+const char* encoderBackend() { return "bench-sim (no encoders)"; }
+
+}  // namespace hw
+
+#else
+
 #if ENC_USE_PCNT
 #if ESP_IDF_VERSION_MAJOR >= 5
 #include <driver/pulse_cnt.h>
@@ -200,3 +253,5 @@ const char* encoderBackend() { return "gpio-isr"; }
 #endif
 
 }  // namespace hw
+
+#endif  // BENCH_SIM

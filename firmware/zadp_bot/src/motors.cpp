@@ -15,6 +15,21 @@
 
 namespace hw {
 
+#if BENCH_SIM
+// ================================================================================================ bench build
+// rule: no GPIO / LEDC pin is touched (the pins stay inputs). motorOut() only records the commanded signed PWM
+// (same clamp as the real driver, logical direction: + = wheel forward); encoders.cpp integrates it.
+static volatile int benchPwm[2] = {0, 0};
+int benchWheelPwm(bool left) { return benchPwm[left ? 0 : 1]; }
+void motorOut(bool left, int pwm) {
+    if (pwm > PWM_MAX) pwm = PWM_MAX;
+    if (pwm < -PWM_MAX) pwm = -PWM_MAX;
+    benchPwm[left ? 0 : 1] = pwm;
+}
+void motorsOff() { motorOut(true, 0); motorOut(false, 0); }
+void motorsBegin() { motorsOff(); }
+
+#else
 static const uint8_t LEDC_CH_L = 0, LEDC_CH_R = 1;
 static int lastOut[2] = {0x7fffffff, 0x7fffffff};   // last signed PWM written per wheel (forces the first write)
 
@@ -77,5 +92,7 @@ void motorsBegin() {
     lastOut[0] = lastOut[1] = 0x7fffffff;
     motorsOff();
 }
+
+#endif  // BENCH_SIM
 
 }  // namespace hw

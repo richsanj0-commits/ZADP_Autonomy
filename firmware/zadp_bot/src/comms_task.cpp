@@ -103,9 +103,14 @@ static bool publishTelemetryLocked() {
 }
 
 // caller holds mqttMutex. contract: zadp/botN/status, retained, once per connect (boot diagnosis without USB)
+#if BENCH_SIM
+#define STATUS_BENCH_FIELD ",\"bench\":true"   // additive field of the TOPICS.md status message: bench build
+#else
+#define STATUS_BENCH_FIELD ""
+#endif
 static bool publishStatusLocked() {
     char buf[STATUS_BUF_SIZE];
-    int n = snprintf(buf, sizeof buf, "{\"id\":%d,\"fw\":\"%s\",\"reset\":\"%s\",\"gyro\":%s,\"ip\":\"%s\",\"rssi\":%d}", BOT_ID,
+    int n = snprintf(buf, sizeof buf, "{\"id\":%d,\"fw\":\"%s\",\"reset\":\"%s\",\"gyro\":%s,\"ip\":\"%s\",\"rssi\":%d" STATUS_BENCH_FIELD "}", BOT_ID,
                      fwBuild(), resetReasonText(), hw::gyroOk() ? "true" : "false", WiFi.localIP().toString().c_str(),
                      (int)WiFi.RSSI());
     return n > 0 && n < (int)sizeof buf && mqtt.publish(TOPIC_STATUS, buf, true);

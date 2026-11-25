@@ -298,6 +298,11 @@ public:
             return CamResult::RejectedJump;
         }
         rejectRun_ = 0;
+#if defined(BENCH_SIM) && BENCH_SIM
+        // rule (bench build): the camera fix is this robot's own estimate echoed by bench_cam.py, so blending it
+        // would only add the error of the assumed round-trip delay. First fix and relock (start-pose reset) stay.
+        return CamResult::Accepted;
+#endif
         // rule: complementary fusion est += gain * (z - est), heading wrapped (pose_fusion.m)
         est_.x += P.camGain * ex; est_.y += P.camGain * ey; est_.th = wrapAngle(est_.th + P.camGain * eh);
         return CamResult::Accepted;

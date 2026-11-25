@@ -21,7 +21,9 @@ function procs = link_launch(P, opts)
 %                 fake_bot.py gets them as --real and refuses them too, so a fake robot never answers on a real
 %                 robot's topics.
 %   opts.camNode  '' (default, none), 'sim' (aruco_node.py --sim: simulated camera fed by zadp/sim/truth, same
-%                 geometry code as the real camera) or 'real' (aruco_node.py on a webcam)
+%                 geometry code as the real camera), 'real' (aruco_node.py on a webcam) or 'bench' (bench_cam.py: the
+%                 robots' own telemetry pose republished as camera poses, for BENCH_SIM boards; broker mode only; it
+%                 first puts the robots on their start poses opts.init, see bench_cam.py)
 %   opts.camBots  robot ids the camera node publishes poses for (default P.cam.robotIds)
 %   opts.camArgs  extra command-line arguments for aruco_node.py (e.g. '--camera 1 --width 1920 --height 1080')
 %   opts.config   link_config.json to write and pass to every helper (default: a fresh temp file per launch,
@@ -105,7 +107,18 @@ try
         procs = startOne(procs, exe, args, procs.logs.sims, 'attached', 'fake_bot.py (simulated robots)');
     end
 
-    if ~isempty(opts.camNode)
+    if strcmp(opts.camNode, 'bench')
+        % rule: the bench camera talks to the broker (it reads the retained status there) and only with real boards
+        assert(strcmp(opts.mode, 'broker'), 'link:benchMode', 'camNode bench needs mode broker');
+        args = sprintf('-u "%s" --broker %s:%d%s%s --log "%s" --robots %s', fullfile(pyDir, 'bench_cam.py'), ...
+            P.mqtt.broker, P.mqtt.port, ttl, cfg, procs.logs.cam, idList(opts.camBots));
+        for i = opts.camBots(:)'
+            args = [args sprintf(' --slot %d=%.5f,%.5f,%.5f', i, opts.init(i,:))]; %#ok<AGROW>
+        end
+        if ~isempty(opts.camArgs), args = [args ' ' opts.camArgs]; end   % e.g. --allow-unflagged
+        if ~isempty(opts.camArgs), args = [args ' ' opts.camArgs]; end   % e.g. --allow-unflagged
+        procs = startOne(procs, exe, args, procs.logs.cam, 'pid=', 'bench_cam.py');
+    elseif ~isempty(opts.camNode)
         args = sprintf('-u "%s" --bridge 127.0.0.1:%d%s%s --log "%s" --robots %s', fullfile(pyDir, 'aruco_node.py'), ...
             opts.port, ttl, cfg, procs.logs.cam, idList(opts.camBots));
         if strcmp(opts.camNode, 'sim'), args = [args ' --sim']; end

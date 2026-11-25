@@ -72,6 +72,10 @@ static void gyroTask(void*) {
 }
 
 bool gyroBegin() {
+#if BENCH_SIM
+    why.store("off (bench build: simulated wheels)");            // rule: bench build touches no I2C and no ToF pins
+    return false;
+#endif
     for (uint8_t p : TOF_XSHUT) {                                // rule: ToF sensors (if any) stay in shutdown
         pinMode(p, OUTPUT_OPEN_DRAIN);
         digitalWrite(p, LOW);

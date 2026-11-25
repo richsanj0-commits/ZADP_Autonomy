@@ -126,6 +126,9 @@ void setup() {
                   ESP_ARDUINO_VERSION_MAJOR, ESP_IDF_VERSION_MAJOR, ESP_IDF_VERSION_MINOR, hw::encoderBackend(), TOPIC_CMD,
                   TOPIC_TELEMETRY);
     Serial.printf("build %s, reset reason: %s, gyro: %s\n", fwBuild(), resetReasonText(), hw::gyroStatus());
+#if BENCH_SIM
+    Serial.printf("*** BENCH BUILD: motors, encoders and gyro are simulated; no hardware is driven ***\n");
+#endif
     Serial.printf("FreeRTOS: control %d Hz (core %d prio %d), telemetry %d Hz, task watchdog %d ms, link-loss stop %.2f s\n",
                   CONTROL_HZ, CTRL_TASK_CORE, CTRL_TASK_PRIO, TELEMETRY_HZ, TWDT_TIMEOUT_MS, (double)LINK_LOSS_STOP_S);
     twdtConfigure();

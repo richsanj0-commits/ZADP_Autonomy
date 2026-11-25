@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "config.h"
+
 namespace hw {
 
 // Motors. motorsBegin() sets every driver pin and writes zero (short brake) BEFORE anything else runs.
@@ -25,5 +27,9 @@ uint8_t gyroWhoAmI();                  // WHO_AM_I register (0x75) read at boot,
 const char* gyroStatus();              // "on (...)" or "off (reason)"
 bool gyroRate(float& radPerS);
 void gyroCheckSign(float encRate);     // yaw rate from the encoders, rad/s
+
+#if BENCH_SIM
+int benchWheelPwm(bool left);          // bench build only: last signed PWM given to motorOut() (motors.cpp)
+#endif
 
 }  // namespace hw

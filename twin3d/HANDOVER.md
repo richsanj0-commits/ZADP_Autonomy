@@ -248,6 +248,10 @@ Everything below runs on the PC that runs MATLAB. Nothing is installed by the re
    It checks Python modules, broker, corners, telemetry + camera pose of every robot, the parking slots of the real
    robots, then runs with `syncToReal`; close the view or Ctrl+C to stop all robots. `run_real('dry', struct('realBots',
    1))` is the same path without hardware (tested by `test_run_real` e).
+   **Bench (bare ESP32 boards with the bench build, no camera, no OpenCV)**: flash `pio run -e botN_bench -t upload`,
+   boards on the hotspot, then `R = run_real('bench', struct('realBots', [2 3], 'maxTime', 60));` (robot 1 simulated by
+   `fake_bot.py`). `link\py\bench_cam.py` first puts each bench robot on its parking slot (fake camera fixes through
+   the firmware's relock), then echoes its telemetry pose as the camera pose; `link\README.md` "Bench mode".
 10. Raise `maxTime` step by step; `R.lk` holds twin-vs-real error, latency and hold times per robot. A full fill
    (about 2880 s sim time) takes as long in wall time.
 

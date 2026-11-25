@@ -42,11 +42,22 @@
 
 // ---------------------------------------------------------------- pins [ref]
 // TB6612FNG. STBY is assumed tied high on the board (not driven by firmware).
+// Wiring B (envs botN_b, -DWIRING_B=1): motor pins in one row of the 30-pin DevKit: D13 D12 D14 . D26 D25 D33.
+// rule: GPIO 12 is a strapping pin (must be low at reset): only the TB6612 input (pull-down) may be on it.
+#if defined(WIRING_B) && WIRING_B
+#define PIN_PWMA 13   // left motor PWM
+#define PIN_AIN1 14
+#define PIN_AIN2 12
+#define PIN_PWMB 33   // right motor PWM
+#define PIN_BIN1 26
+#define PIN_BIN2 25
+#else
 #define PIN_PWMA 27   // left motor PWM
 #define PIN_AIN1 14
 #define PIN_AIN2 26
 #define PIN_PWMB 32   // right motor PWM
 #define PIN_BIN1 25
+#endif
 // FLAG: the breadboard robot uses GPIO 33. The PCB design moves BIN2 to GPIO 5. Set PIN_BIN2 to 5 for PCB
 // robots (e.g. build_flags -DPIN_BIN2=5). GPIO 5 is a strapping pin and toggles at reset, so the right motor
 // may twitch while the ESP32 boots.
@@ -58,7 +69,8 @@
 #define PIN_ENC_L_B 35
 #define PIN_ENC_R_A 36
 #define PIN_ENC_R_B 39
-#define PIN_LED     2    // on-board blue LED [ref]
+#define PIN_BUTTON  4    // push button to GND (internal pull-up: pressed = LOW). Reserved, not read yet
+#define PIN_LED     2   // on-board blue LED [ref]
 
 // Directions [ref]: forward PWM on the left motor is AIN1 LOW / AIN2 HIGH (inverted), on the right motor
 // BIN1 HIGH / BIN2 LOW. Encoder sign: left +1, right -1 makes forward counts positive (checked on the
@@ -213,3 +225,15 @@
 #define PCNT_FILTER_NS      1000     // ignore pulses shorter than 1 us (also the 80 ns GPIO 36/39 dips with WiFi on);
                                      // shortest real edge spacing at top speed is about 70 us
 #define PCNT_LIMIT          30000    // hardware counter range +-PCNT_LIMIT; it is unwrapped to 32 bit every tick
+
+// ---------------------------------------------------------------- bench build [fw]
+// -DBENCH_SIM=1 (envs botN_bench): a BARE ESP32 (no motor driver, no encoders, no gyro) behaves like a moving robot.
+// Only the lowest layer changes (motors.cpp, encoders.cpp, gyro.cpp); tasks, queues, MQTT, control laws, wheel PI and
+// watchdogs are the real code. motors: no GPIO touched, the signed PWM is only recorded. encoders: counts come from a
+// wheel model fed by that PWM (speed = sign * max(0, |pwm| - PWM_DEADBAND) / PWM_PER_MPS, first-order lag
+// BENCH_MOTOR_TAU_S, CPR_x / WHEEL_DIAMETER_M for counts). gyro: off, no I2C, no ToF pins.
+#ifndef BENCH_SIM
+#define BENCH_SIM 0
+#endif
+#define BENCH_MOTOR_TAU_S   0.05f    // s, first-order lag of the simulated wheel speed (real: MOTOR_TAU_S 0.08 incl. PI loop)
+#define BENCH_MAX_STEP_S    0.25f    // s, longest elapsed time integrated in one encodersRead() (a stalled task is not a jump)

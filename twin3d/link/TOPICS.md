@@ -120,6 +120,28 @@ MATLAB <-> `bridge.py`: localhost TCP (`P.link.bridgePort` 18830), newline-delim
 bridge sends `zadp/bridge/status` = `{"mode":"loopback"|"broker","broker":...,"repeatHz":...,"hostTimeout":...}`.
 `zadp/sim/truth` (`fake_bot.py --truth` -> `aruco_node.py --sim`) exists only in dry runs.
 
+## Bench mode (additive, `run_real('bench')`)
+Bare ESP32 boards running the firmware bench build (`-DBENCH_SIM=1`, status carries `"bench":true`) have no floor and
+no camera. `py/bench_cam.py` publishes `zadp/cam/pose` for them in the format above (same fields, `t` = Unix time of
+the telemetry on the PC minus `P.link.netDelay`, `age` = publish time - `t`), per bench robot at most `P.cam.rateHz`,
+only when a new telemetry message arrived, nothing for an `offline` robot or telemetry older than `P.cam.maxAge`.
+Start pose: before the echo it publishes the robot's parking-slot pose as fixes until the telemetry reports it (the
+"robot moved by hand" path of Fusion: 10 fixes in a row beyond 50 mm / 20 deg replace the estimate). No new topic,
+field or firmware behaviour; `'real'` and `'dry'` do not use it.
+Safety rules (enforced in `bench_cam.py` / `run_real.m`): (1) the retained `zadp/botN/status` of every bench robot must
+carry `"bench":true`, else ERROR and exit 2 before any pose is published (`--allow-unflagged`, `run_real` option
+`benchUnflagged`, only for boards flashed before the flag existed); the retained status is the last one published, not
+proof of life (telemetry is). (2) `run_real('bench')` needs `realBots` named explicitly (never the default "all", so
+robot 1, the floor robot, is never addressed by accident). (3) A second camera node already publishing for one of the
+robots is an ERROR. (4) Echo faults: seq back to 0 after a command, or a telemetry pose step above `P.link.parkTol` /
+`parkTolDeg` between two messages = board restarted; the echo of that robot stops, the log says `ERROR robot N
+restarted` and `run_real` ends the run (a real camera would correct a boot pose, the echo cannot).
+Known bias (not corrected, measure once on the bench): the echo passes the firmware latency compensation
+(lag = `age` + `P.link.netDelay`). If the true robot -> PC -> robot delay differs by D seconds, each accepted fix shifts
+the estimate by about 0.3 * v * D, i.e. the estimate's speed is scaled by roughly (1 - 6 D) at 20 fixes/s (D = 30 ms:
+about 18 % slower). Poses and `arrived` stay self-consistent, only timing and encoder-vs-pose figures are biased.
+`netDelay` is shared with the real camera and is not tuned for this.
+
 ## Decisions (firmware/README.md section 6 had 18 open points; all are resolved above)
 1 watchdog scope: drive / turn phases only. 2 last will `offline`. 3 `stop` ends in `arrived` once stopped.
 4 unknown action: seq taken, command cancelled, `idle`. 5 missing fields: goto without x/y or turn without heading =

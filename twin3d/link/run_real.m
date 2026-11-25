@@ -5,6 +5,12 @@ function R = run_real(mode, opts)
 %                             broker (the 3-robot twin runs with 1, 2 or 3 real robots)
 %   R = run_real('dry')       the SAME code path without hardware: loopback bridge, fake_bot.py robots (no camera of
 %                             their own) and aruco_node.py --sim (synthetic marker pixels through the real geometry)
+%   R = run_real('bench', struct('realBots', [2 3]))   BENCH: robots 2 and 3 are bare ESP32 boards running the firmware
+%                             bench build (-DBENCH_SIM=1, motors and encoders simulated on the chip), the others are
+%                             simulated by fake_bot.py as in the mixed mode. No camera and no OpenCV: bench_cam.py
+%                             republishes each bench robot's own telemetry pose as zadp/cam/pose, after first putting the
+%                             robot on its parking slot (a fake camera fix; see py/bench_cam.py). Never with robots on
+%                             the floor. 'real' and 'dry' are unchanged.
 %   R = run_real(mode, opts)  opts: maxTime (sim s = wall s, default 600 real / 30 dry), syncToReal (true),
 %                             show (live 3D view; default true real / false dry: the view is then built hidden and
 %                             still driven, so the path is tested), viewDt (s between view refreshes, 0.2),
@@ -15,6 +21,8 @@ function R = run_real(mode, opts)
 %                             seen by the simulated camera),
 %                             dry only: init (N-by-3 fake robot start poses, row i = robot i, default the parking slots),
 %                             simHideCorner (corner ids hidden from the simulated camera, e.g. '11'),
+%                             bench only: benchUnflagged (true = accept boards whose retained status has no "bench":true,
+%                             flashed before the flag existed; default false: bench_cam.py refuses them),
 %                             viewHook (function viewHook(W, fig) called after each view refresh; the test uses it
 %                             to close the view like a user)
 %   Steps (each prints one line; any failure stops with a message that says what to fix):
@@ -22,32 +30,39 @@ function R = run_real(mode, opts)
 %     2. preflight: Python, numpy, paho-mqtt (real), OpenCV with cv2.aruco (real), broker reachable at
 %        P.mqtt.broker:P.mqtt.port (real; when none answers and that host is this PC, link_launch starts
 %        py/mini_broker.py and link_kill stops it at the end)
-%     3. starts bridge.py (real: broker mode, no fallback; dry: loopback), aruco_node.py (publishes the real robots
-%        only), fake_bot.py for the simulated robots (+ stand-ins for the real ones in dry); waits until the camera
-%        node has seen all corner markers (P.link.camStartTimeout)
+%     3. starts bridge.py (real / bench: broker mode, no fallback; dry: loopback), aruco_node.py (publishes the real
+%        robots only; bench: bench_cam.py instead), fake_bot.py for the simulated robots (+ stand-ins for the real
+%        ones in dry); waits until the camera node has seen all corner markers (P.link.camStartTimeout); bench: until
+%        bench_cam.py has put every bench robot on its parking slot and says "bench ready" (error text in its log)
 %     4. waits for telemetry AND a camera pose from every robot (P.link.readyTimeout)
 %     5. checks every REAL robot i stands on parking slot P<i> (P.link.parkTol, P.link.parkTolDeg) and names any that
 %        does not (a simulated robot starts on its slot by construction)
 %     6. brain_run_linked with syncToReal and the live 3D view drawn at the REAL (camera) poses
 %   Any error, Ctrl+C or closing the view sends stop to every robot, closes the link and kills every helper process.
-%   R: mode, realBots, simBots, lk, mon (twin safety monitors), log, procs, checks (preflight / corners / ready flags,
+%   R: mode, realBots, simBots, lk, mon (twin safety monitors), log, procs, checks (preflight / corners (bench: bench) / ready flags,
 %   park = bot, dist, headingDeg per real robot), camLog.
 if nargin < 1 || isempty(mode), mode = 'real'; end
 if nargin < 2, opts = struct(); end
-mode = validatestring(mode, {'real', 'dry'});
+mode = validatestring(mode, {'real', 'dry', 'bench'});
 dry = strcmp(mode, 'dry');
+bench = strcmp(mode, 'bench');
 here = fileparts(mfilename('fullpath'));
 def = struct('maxTime', 600 - 570*dry, 'syncToReal', true, 'show', ~dry, 'viewDt', 0.2, 'camArgs', '', ...
     'plan', fullfile(fileparts(here), 'plan', 'plan_arena.json'), 'seed', 1, 'init', [], 'simHideCorner', '', 'viewHook', [], ...
-    'realBots', 'all');
+    'realBots', 'all', 'benchUnflagged', false);
 f = fieldnames(def);
 for i = 1:numel(f), if ~isfield(opts, f{i}), opts.(f{i}) = def.(f{i}); end, end
 
 P = twin_params();
 nb = P.bot.count;
+% rule: bench mode needs the bench robots named explicitly: run_real('bench') alone must never address robot 1, the real
+% floor robot (a fake camera would be fed to it)
+assert(~(bench && ischar(opts.realBots)), 'run_real:realBots', ...
+    'bench mode needs opts.realBots, e.g. struct(''realBots'', [2 3]): only bare bench boards, never a robot on the floor');
 if ischar(opts.realBots), opts.realBots = 1:nb; end
 realBots = unique(opts.realBots(:)');
 assert(all(ismember(realBots, 1:nb)), 'run_real:realBots', 'realBots must be robot ids 1..%d', nb);
+assert(~bench || ~isempty(realBots), 'run_real:realBots', 'bench mode needs at least one bench robot in realBots');
 simBots = setdiff(1:nb, realBots);
 plan = load_plan(opts.plan);
 Lay = brain_layout(plan, P);
@@ -64,7 +79,8 @@ say('numbers from twin_params written to %s', cfgFile);
 if isempty(exe), error('run_real:python', 'Python not found on the PATH (install Python 3 and make "python" work in a shell).'); end
 say('[ok] Python %s (%s)', pyVer, exe);
 need = {'numpy', 'pip install numpy'};
-if ~dry, need(end+1, :) = {'cv2; assert hasattr(cv2, "aruco")', 'pip install opencv-contrib-python'}; end
+% rule: OpenCV only for the real camera (dry: synthetic pixels, bench: telemetry echo)
+if ~dry && ~bench, need(end+1, :) = {'cv2; assert hasattr(cv2, "aruco")', 'pip install opencv-contrib-python'}; end
 for k = 1:size(need, 1)
     [st, out] = system(sprintf('"%s" -c "import %s"', exe, need{k, 1}));
     if st ~= 0
@@ -105,6 +121,9 @@ if dry
     if ~isempty(opts.init), lo.init = opts.init; end
 else
     lo.mode = 'broker'; lo.camNode = 'real'; lo.bots = []; lo.realBots = realBots;
+    % rule: bench boards have no camera: bench_cam.py (broker, own telemetry as camera pose, start pose = parking slot)
+    if bench, lo.camNode = 'bench'; end
+    if bench && opts.benchUnflagged, lo.camArgs = strtrim([lo.camArgs ' --allow-unflagged']); end
 end
 say('real robots %s, simulated robots %s', mat2str(realBots), mat2str(simBots));
 h = [];
@@ -122,15 +141,31 @@ if strcmp(procs.broker, 'mini')
 end
 if ~dry && ~strcmp(procs.mode, 'broker'), error('run_real:bridge', 'bridge is not in broker mode (%s)', procs.mode); end
 t0 = tic;
-while ~contains(readLog(procs.logs.cam), 'homography ready')
-    if toc(t0) > P.link.camStartTimeout
+camWord = 'homography ready';
+if bench, camWord = 'bench ready'; end
+while ~contains(readLog(procs.logs.cam), camWord)
+    % rule: a failed bench_cam.py says ERROR (it logs any exception that way) or died with a traceback
+    if bench && (contains(readLog(procs.logs.cam), 'ERROR') || contains(readLog(procs.logs.cam), 'Traceback'))
+        error('run_real:bench', 'bench_cam.py stopped (status not a bench build, no telemetry, slot not reached, ...):\n%s', ...
+            lastLines(readLog(procs.logs.cam), 6));
+    end
+    if bench && toc(t0) > P.link.camStartTimeout + P.link.readyTimeout
+        error('run_real:bench', 'bench_cam.py not ready within %g s. Last log lines:\n%s', ...
+            P.link.camStartTimeout + P.link.readyTimeout, lastLines(readLog(procs.logs.cam), 6));
+    end
+    if ~bench && toc(t0) > P.link.camStartTimeout
         error('run_real:corners', ['the camera node did not see all corner markers (ids %s) within %g s. ' ...
             'Last camera log lines:\n%s'], mat2str(P.cam.cornerIds), P.link.camStartTimeout, lastLines(readLog(procs.logs.cam), 6));
     end
     pause(0.2);
 end
-say('[ok] camera node sees all %d corner markers', numel(P.cam.cornerIds));
-R.checks.corners = true;
+if bench
+    say('[ok] bench camera: robots %s reset to their parking slots, echoing their telemetry as camera poses', mat2str(realBots));
+    R.checks.bench = true;
+else
+    say('[ok] camera node sees all %d corner markers', numel(P.cam.cornerIds));
+    R.checks.corners = true;
+end
 
 % ---- 4. every robot heard (telemetry) and seen (camera)
 L = link_open(P, struct('port', procs.port));
@@ -146,9 +181,11 @@ while true
     hasCam = ~cellfun(@isempty, cam);
     if all(hasTel) && all(hasCam), break; end
     if toc(t0) > P.link.readyTimeout
+        camHint = 'marker id = robot number, in view, lit?';
+        if bench, camHint = sprintf('bench: board power / WiFi, see the bench camera log %s', procs.logs.cam); end
         error('run_real:notReady', ['after %g s: no telemetry from robot(s) %s (power, WiFi, secrets.h MQTT_HOST = ' ...
-            'this PC?), no camera pose for robot(s) %s (marker id = robot number, in view, lit?); simulated robots %s ' ...
-            '(log %s)'], P.link.readyTimeout, mat2str(find(~hasTel)), mat2str(find(~hasCam)), mat2str(simBots), ...
+            'this PC?), no camera pose for robot(s) %s (%s); simulated robots %s ' ...
+            '(log %s)'], P.link.readyTimeout, mat2str(find(~hasTel)), mat2str(find(~hasCam)), camHint, mat2str(simBots), ...
             procs.logs.sims);
     end
     pause(0.05);
@@ -186,6 +223,7 @@ ctx('fig') = h.fig;
 % workspace alive, and the onCleanup (stop + kill) would then never run
 set(h.fig, 'CloseRequestFcn', @(src, ~) closeView(src, ctx), 'Name', sprintf('ZADP twin with the real robots (%s)', mode));
 world_view(h, 'top');
+tAbortChk = tic;
 nView = 0; tView = -Inf; nSpots = numel(brain_init(plan, P, opts.seed).spots);
 say('running %g s (syncToReal %d); close the view or press Ctrl+C to stop all robots', opts.maxTime, opts.syncToReal);
 [W, log, lk] = brain_run_linked(plan, P, struct('link', L, 'maxTime', opts.maxTime, 'seed', opts.seed, ...
@@ -215,6 +253,12 @@ R.camLog = readLog(procs.logs.cam);
 
     function a = isAborted()
         a = isKey(ctx, 'abort');                          % set by closeView: brain_run_linked ends with link:aborted
+        % rule: bench only: bench_cam.py logs ERROR when a board restarted mid-run (the echo cannot correct a boot pose):
+        % end the run (log checked once a second; the log is small)
+        if ~a && bench && toc(tAbortChk) > 1
+            tAbortChk = tic;
+            a = contains(readLog(procs.logs.cam), 'ERROR');
+        end
     end
 
 end
