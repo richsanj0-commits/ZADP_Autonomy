@@ -2,6 +2,7 @@
 //
 // Tasks (rates, priorities, cores, stacks: include/config.h, "FreeRTOS tasks"):
 //   control   core 1, CTRL_TASK_PRIO, CONTROL_HZ (vTaskDelayUntil): encoders, zadp::Truck, motors, watchdogs
+//   (esp_timer task, core 0: motor guard callback, motors.cpp; zeroes the motors if control stops ticking)
 //   comms     core 0: WiFi + MQTT state machine, JSON parsing -> ctrlQ / camQ
 //   telemetry core 0: TELEMETRY_HZ + at once on a new seq (notified by control) -> MQTT
 //   gyro      core 1, GYRO_TASK_PRIO: MPU6050 rate -> atomics (only if a gyro was found; started in gyro.cpp)
@@ -51,6 +52,8 @@ struct Snapshot {
     float x = 0, y = 0, h = 0;
     zadp::State state = zadp::State::Idle;
     bool stalled = false, raw = false, camInit = false, linkStop = false;
+    bool camStale = false;       // stopped by the camera watchdog (CAM_STALE_S)
+    int32_t camAgeMs = -1;       // ms since the last accepted camera fix, -1 = none yet (telemetry `cam`)
     float pwmL = 0, pwmR = 0, vL = 0, vR = 0, refL = 0, refR = 0;
     uint32_t ticks = 0, overruns = 0, execMaxUs = 0;
     uint32_t camAccepted = 0, camRejected = 0, cmdNew = 0, cmdRepeat = 0;
@@ -83,7 +86,7 @@ bool getSnapshot(Snapshot& s);
 inline bool mqttUp() { return (xEventGroupGetBits(linkEvents) & LINK_MQTT_UP) != 0; }
 inline bool wifiUp() { return (xEventGroupGetBits(linkEvents) & LINK_WIFI_UP) != 0; }
 
-// telemetry JSON of one snapshot (contract: {id, seq, encL, encR, x, y, heading, state}); length or -1
+// telemetry JSON of one snapshot (contract: {id, seq, encL, encR, x, y, heading, state, cam}); length or -1
 int formatTelemetry(const Snapshot& s, char* buf, size_t size);
 
 // comms_task.cpp

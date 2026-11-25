@@ -92,7 +92,9 @@ PCNT encoders, odometry, camera fusion, go-to / turn laws, wheel PI, PWM, 300 ms
 `gyro` (core 1, prio 10, 5 ms, only if an MPU6050 is found: I2C read, rate to atomics), `telemetry` (core 0, prio 6, 20 Hz + at once on a new seq), `comms` (core 0, prio 5, WiFi + MQTT state machine with
 backoff, JSON parsing), `console` (core 1, prio 2, serial bench self-test, boot stack report), `health` (core 1, prio 1,
 LED). Queues: `ctrlQ` (commands, FIFO), `camQ` and `snapQ` (length 1, overwrite). The task watchdog (1 s, reset) watches
-only the control task. The maths is `include\motion_core.h`, mirrored by `test\host\js_mirror\mirror_test.js`; its
+only the control task. Two more stops: the camera watchdog (`CAM_STALE_S`: a robot that has seen the camera stops when no fix
+is accepted for 1 s and resumes on the next fix) and the motor guard (`MOTOR_GUARD_MS`: an `esp_timer` zeroes the motors when
+the control task has not ticked for 50 ms). The maths is `include\motion_core.h`, mirrored by `test\host\js_mirror\mirror_test.js`; its
 numbers are checked against `twin_params.m` by `test_firmware`.
 
 **tests\\** `test_*.m` scripts and `run_all_tests.m`; `check_brain_run` (one full fill with every assert, used by
@@ -254,6 +256,10 @@ Everything below runs on the PC that runs MATLAB. Nothing is installed by the re
    It checks Python modules, broker, corners, telemetry + camera pose of every robot, the parking slots of the real
    robots, then runs with `syncToReal`; close the view or Ctrl+C to stop all robots. `run_real('dry', struct('realBots',
    1))` is the same path without hardware (tested by `test_run_real` e).
+   The run stops all robots by itself and prints `ended early ...` with the reason when: a robot is offline or silent
+   (`link:silent`), the camera has not seen a robot for 1 s (`link:camLost`), a robot is more than 0.10 m from its twin
+   for 1 s (`link:diverged`), or the camera helper exited or logged an error (`link:aborted`). Limits: `P.link.camLossTime`,
+   `divergeLimit`, `divergeTime`, `camCheckDt` in `twin_params.m`; table in `link/TOPICS.md` "Run end / abort".
    **Bench (bare ESP32 boards with the bench build, no camera, no OpenCV)**: flash `pio run -e botN_bench -t upload`,
    boards on the hotspot, then `R = run_real('bench', struct('realBots', [2 3], 'maxTime', 60));` (robot 1 simulated by
    `fake_bot.py`). `link\py\bench_cam.py` first puts each bench robot on its parking slot (fake camera fixes through

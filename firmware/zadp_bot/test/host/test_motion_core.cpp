@@ -302,9 +302,69 @@ static void testCamera() {
     r = T.onCamera(0.7f, 0.5f, 0.f, tImg + tt + 0.05, 0.04f, now + tt + 0.05); check(r == CamResult::Accepted, "the next timely fix is accepted again");
 }
 
+// same checks as mirror_test.js testCamStale
+static void testCamStale() {
+    std::printf("\nTEST camera watchdog (no accepted fix for 1 s while driving or turning)\n");
+    Harness H(801, makePose(0.1f, 0.5f, 0.f)); Truck& T = H.truck;
+    check(T.camAgeMs(H.t) == -1, "before the first fix the telemetry field cam is -1");
+    H.run(0.3); H.send(gotoCmd(1, 0.9f, 0.5f, 0.f)); H.run(1.0);
+    int32_t ageOn = T.camAgeMs(H.t);
+    check(T.state() == State::Moving && !T.camStale() && ageOn >= 0 && ageOn < 100, "camera on: moving, cam age below 100 ms");
+    H.camOn = false; double ts = H.t, tI = -1, tS = -1;
+    while (H.t - ts < 3) { H.tick(); if (tI < 0 && T.state() == State::Idle) tI = H.t - ts; if (tI >= 0 && tS < 0 && H.trueSpeed() < 0.002) tS = H.t - ts; }
+    Pose p1 = H.plant.pose; H.run(1.0); double creep = dist(H.plant.pose, p1.x, p1.y);
+    std::printf("  camera off: idle %.3f s later, wheels stopped %.3f s later, creep %.2f mm, cam age %ld ms\n", tI, tS, creep * 1000, (long)T.camAgeMs(H.t));
+    check(tI > CAM_STALE_S - 0.01 && tI <= CAM_STALE_S + 0.065, "state idle 1 s after the last accepted fix (not earlier)");
+    check(tS > 0 && tS <= CAM_STALE_S + 0.065 + 0.2 / MAX_ACCEL + 0.1, "wheels stopped within 1 s + ramp-down");
+    check(creep < 0.0005 && T.stalled() && T.camStale() && T.seq() == 1, "robot stays put, goal kept (same seq), although cmd repeats keep coming");
+    check(T.camAgeMs(H.t) > 1000, "cam age in telemetry keeps counting above 1000 ms");
+    bool ack = H.send(gotoCmd(2, 0.9f, 0.5f, 0.f)); H.run(0.5);
+    check(ack && T.state() == State::Idle && T.camStale() && H.trueSpeed() < 0.002, "a NEW command does not resume: still no camera, still stopped");
+    H.camOn = true; H.nextCam = H.t; double tr = H.t, tM = -1;
+    while (H.t - tr < 1 && tM < 0) { H.tick(); if (T.state() == State::Moving) tM = H.t - tr; }
+    double tt = H.runUntilArrived(2, 20);
+    std::printf("  camera back: moving %.3f s later, arrived after %.2f s\n", tM, tt);
+    check(tM > 0 && tM <= 0.07 && !T.camStale(), "resumes with the first accepted fix");
+    check(tt > 0 && dist(H.plant.pose, 0.9, 0.5) < 0.010, "then arrives (true position within 10 mm)");
+    Params Pv; Pv.cruise = 0.03f;                                // a turn slowed down so that it needs more than 1 s
+    Harness V(803, makePose(0.5f, 0.5f, 0.f), Pv); V.run(0.3); V.send(turnCmd(1, 3.0f, 1)); V.run(0.3); V.camOn = false;
+    double v0 = V.t, vI = -1; while (V.t - v0 < 3 && vI < 0) { V.tick(); if (V.truck.state() == State::Idle) vI = V.t - v0; }
+    check(vI > CAM_STALE_S - 0.01 && vI <= CAM_STALE_S + 0.065 && V.truck.camStale(), "a turn is stopped the same way");
+    Harness G(804, makePose(0.1f, 0.5f, 0.f)); G.camOn = false; G.send(gotoCmd(1, 0.9f, 0.5f, 0.f));
+    double tg = G.runUntilArrived(1, 20);
+    check(tg > 2 && !G.truck.camStale() && G.truck.camAgeMs(G.t) == -1, "a robot that never saw a camera drives longer than 1 s and arrives (cam -1)");
+    Harness B(805, makePose(0.1f, 0.5f, 0.f)); B.camOn = false; B.truck.setPose(makePose(0.1f, 0.5f, 0.f)); B.send(gotoCmd(1, 0.9f, 0.5f, 0.f));
+    check(B.runUntilArrived(1, 20) > 2 && B.truck.camAgeMs(B.t) == -1, "a bench pose (setPose) does not arm the camera watchdog");
+    Harness L(806, makePose(0.1f, 0.5f, 0.f)); L.run(0.3); L.camOn = false; L.keepAlive = false;
+    Command lc = gotoCmd(1, 0.9f, 0.5f, 0.f); lc.local = true; L.send(lc);
+    check(L.runUntilArrived(1, 20) > 2 && !L.truck.camStale(), "a serial bench command (local) is not stopped by the camera watchdog");
+    Harness D(807, makePose(0.5f, 0.5f, 0.f)); D.run(0.3); D.camOn = false; D.send(simpleCmd(1, Action::Dump));
+    check(std::fabs(D.runUntilArrived(1, 6) - 4) < 0.011, "a dump keeps timing without the camera (wheels are still anyway)");
+}
+
+// same checks as mirror_test.js testCamOrder
+static void testCamOrder() {
+    std::printf("\nTEST camera order check is bounded (camera clock stepped back)\n");
+    Truck T; T.begin(makePose(0.5f, 0.5f, 0.f), 0, 0, 1.0);
+    double now = 1.0; for (int i = 0; i < 20; ++i) { now += 0.005; T.step(now, 0, 0); }
+    auto fix = [&](double tImg) { now += 0.033; T.step(now, 0, 0); return T.onCamera(0.5f, 0.5f, 0.f, tImg, 0.04f, now); };
+    CamResult r = fix(2000.0); check(r == CamResult::Initialised, "first fix initialises");
+    r = fix(2000.033); check(r == CamResult::Accepted, "next fix in order accepted");
+    bool lone = true;
+    for (int i = 0; i < 30; ++i) { if (fix(1999.0) != CamResult::RejectedOrder) lone = false; if (fix(2000.1 + 0.033 * i) != CamResult::Accepted) lone = false; }
+    check(lone, "single out-of-order fixes between good ones are always rejected (the count resets)");
+    int k = 0; double tb = 1500.0; r = CamResult::RejectedOrder;
+    while (r == CamResult::RejectedOrder && k < 50) { tb += 0.033; r = fix(tb); ++k; }
+    std::printf("  clock 500 s back: accepted again at fix %d (%d rejected)\n", k, k - 1);
+    check(r == CamResult::Accepted && k == CAM_RELOCK_COUNT, "after 10 fixes in a row from the stepped-back clock the order check re-bases and accepts");
+    tb += 0.033; r = fix(tb); check(r == CamResult::Accepted, "the following fix on the new time base is accepted");
+    r = fix(tb - 0.1); check(r == CamResult::RejectedOrder, "an out-of-order fix on the new time base is rejected again");
+    check(T.camAgeMs(now) >= 0 && T.camAgeMs(now) < 100, "cam age follows the accepted fixes");
+}
+
 int main() {
     std::printf("motion_core host test: CONTROL_HZ %d, cruise %.2f m/s, fusion gain %.2f\n", CONTROL_HZ, (double)CRUISE_SPEED, (double)CAM_FUSION_GAIN);
-    testSemantics(); testGoto(true); testGoto(false); testLine(); testTurn(false); testTurn(true); testSpeedLimit(); testWatchdog(); testCamera();
+    testSemantics(); testGoto(true); testGoto(false); testLine(); testTurn(false); testTurn(true); testSpeedLimit(); testWatchdog(); testCamera(); testCamStale(); testCamOrder();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

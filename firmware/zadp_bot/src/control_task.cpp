@@ -1,7 +1,7 @@
 // control_task.cpp : the hard real-time task. Fixed CONTROL_HZ (vTaskDelayUntil), highest priority on core 1.
 // Per tick: drain ctrlQ (commands, bench), take the latest camera fix (camQ), read the encoders, run zadp::Truck
 // (odometry, fusion, state machine, laws, wheel PI; motion_core.h), apply the link-loss stop, write the motors,
-// publish a snapshot (snapQ), notify telemetry on a new seq, feed the task watchdog.
+// publish a snapshot (snapQ), notify telemetry on a new seq, feed the task watchdog and the motor guard.
 // Rules: never blocks (all queue calls have timeout 0), no heap, no String, no network calls.
 #include <Arduino.h>
 #include <esp_task_wdt.h>
@@ -40,6 +40,7 @@ void controlTask(void*) {
     for (;;) {
         vTaskDelayUntil(&last, period);                          // rule: fixed rate, never waits on the network
         esp_task_wdt_reset();
+        hw::motorGuardKick();                                    // rule: every tick tells the motor guard we are alive
         const int64_t us = esp_timer_get_time();
         if (us - prevUs > 2 * periodUs) ++overruns;              // a tick was missed
         prevUs = us;
@@ -101,6 +102,7 @@ void controlTask(void*) {
         s.x = truck.est().x; s.y = truck.est().y; s.h = truck.est().th;
         s.state = truck.state(); s.stalled = truck.stalled(); s.raw = truck.rawActive();
         s.camInit = truck.camInitialised(); s.linkStop = linkStop;
+        s.camStale = truck.camStale(); s.camAgeMs = truck.camAgeMs(now);
         s.pwmL = linkStop ? 0.f : truck.pwmL(); s.pwmR = linkStop ? 0.f : truck.pwmR();
         s.vL = truck.speedL(); s.vR = truck.speedR();
         s.refL = truck.refL(); s.refR = truck.refR();

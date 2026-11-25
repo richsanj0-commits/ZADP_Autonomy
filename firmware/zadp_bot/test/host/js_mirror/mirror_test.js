@@ -16,7 +16,7 @@ const C = {
   HEADING_TOL_DEG: 3, MIN_TURN_RATE: 0.3, CAPTURE_RADIUS_M: 0.03, SLIDE_DIST_M: 0.05, LOOKAHEAD_M: 0.15,
   TURN_WRAP_SLACK: 0.3, STOPPED_SPEED: 0.002, DUMP_TIME_S: 4.0, WATCHDOG_S: 0.3,
   CAM_FUSION_GAIN: 0.3, CAM_NET_DELAY_S: 0.01, CAM_DEFAULT_LAG_S: 0.05, CAM_MAX_AGE_S: 0.25,
-  CAM_MAX_JUMP_M: 0.05, CAM_MAX_JUMP_DEG: 20, CAM_RELOCK_COUNT: 10,
+  CAM_MAX_JUMP_M: 0.05, CAM_MAX_JUMP_DEG: 20, CAM_RELOCK_COUNT: 10, CAM_STALE_S: 1.0, CAM_AGE_REPORT_MAX_MS: 99999,
   CONTROL_HZ: 200, VEL_WINDOW: 4, PWM_MAX: 255, PWM_DEADBAND: 15,
   WHEEL_KP: 600, WHEEL_KI: 7500, WHEEL_KD: 0, WHEEL_I_LIMIT: 120, REF_ZERO: 1e-4,
 };
@@ -40,6 +40,7 @@ function Params() {
     stoppedSpeed: C.STOPPED_SPEED, dumpTime: C.DUMP_TIME_S, watchdog: C.WATCHDOG_S,
     camGain: C.CAM_FUSION_GAIN, camNetDelay: C.CAM_NET_DELAY_S, camDefaultLag: C.CAM_DEFAULT_LAG_S, camMaxAge: C.CAM_MAX_AGE_S,
     camMaxJump: C.CAM_MAX_JUMP_M, camMaxJumpRad: deg2rad(C.CAM_MAX_JUMP_DEG), camRelock: C.CAM_RELOCK_COUNT,
+    camStale: C.CAM_STALE_S,
     dt: 1 / C.CONTROL_HZ, velWindow: C.VEL_WINDOW,
     pwmMax: C.PWM_MAX, deadband: C.PWM_DEADBAND, pwmPerMps: C.PWM_PER_MPS,
     kp: C.WHEEL_KP, ki: C.WHEEL_KI, kd: C.WHEEL_KD, iLimit: C.WHEEL_I_LIMIT, refZero: C.REF_ZERO,
@@ -138,6 +139,7 @@ const H = 64;
 
 class Truck {
   constructor(P) { this.P = P || Params(); this.camInit = false; this.haveT = false; this.lastT = 0; this.rejectRun = 0;
+    this.camSeen = false; this.camStale = false; this.lastCamOk = 0; this.orderRun = 0;
     this.raw = false; this.lastRx = -1e9; this.local = false; this.stalled = false; this.rot = false; this.speed = C.CRUISE_SPEED;
     this.timer = 0; this.dir = 0; this.tol = 0; }
   begin(start, eL, eR, now = 0) {
@@ -168,7 +170,9 @@ class Truck {
   onCamera(x, y, h, tImage, age, now) {
     const P = this.P;
     if (tImage > 0) {
-      if (this.haveT && tImage <= this.lastT) return CR.RejectedOrder;
+      // bounded order check: camRelock rejections in a row = the camera clock stepped back, re-base and go on
+      if (this.haveT && tImage <= this.lastT && ++this.orderRun < P.camRelock) return CR.RejectedOrder;
+      this.orderRun = 0;
       this.haveT = true; this.lastT = tImage;
     }
     const lag = age >= 0 ? age + P.camNetDelay : P.camDefaultLag;
@@ -178,17 +182,20 @@ class Truck {
     const rx = c0 * dx + s0 * dy, ry = -s0 * dx + c0 * dy, dth = wrapAngle(o1.th - o0.th);
     const hz = wrapAngle(h), cz = Math.cos(hz), sz = Math.sin(hz);
     const z = pose(x + cz * rx - sz * ry, y + sz * rx + cz * ry, wrapAngle(hz + dth));
-    if (!this.camInit) { this.est = { ...z }; this.camInit = true; return CR.Initialised; }
+    if (!this.camInit) { this.est = { ...z }; this.camInit = true; this.camSeen = true; this.lastCamOk = now; return CR.Initialised; }
     const ex = z.x - this.est.x, ey = z.y - this.est.y, eh = wrapAngle(z.th - this.est.th);
     if (Math.hypot(ex, ey) > P.camMaxJump || Math.abs(eh) > P.camMaxJumpRad) {
-      if (++this.rejectRun >= P.camRelock) { this.est = { ...z }; this.rejectRun = 0; return CR.Relocked; }
+      if (++this.rejectRun >= P.camRelock) { this.est = { ...z }; this.rejectRun = 0; this.camSeen = true; this.lastCamOk = now; return CR.Relocked; }
       return CR.RejectedJump;
     }
     this.rejectRun = 0;
+    this.camSeen = true; this.lastCamOk = now;
     this.est.x += P.camGain * ex; this.est.y += P.camGain * ey; this.est.th = wrapAngle(this.est.th + P.camGain * eh);
     return CR.Accepted;
   }
-  setPose(p) { this.est = { ...p }; this.camInit = true; }
+  setPose(p) { this.est = { ...p }; this.camInit = true; }   // not a camera: camSeen unchanged
+  camAgeMs(now) { if (!this.camSeen) return -1; const ms = (now - this.lastCamOk) * 1000;
+    return ms < 0 ? 0 : ms > C.CAM_AGE_REPORT_MAX_MS ? C.CAM_AGE_REPORT_MAX_MS : Math.trunc(ms); }
   step(now, encL, encR) {
     const P = this.P, dt = P.dt;
     const dL = encL - this.lastEncL, dR = encR - this.lastEncR;
@@ -201,8 +208,11 @@ class Truck {
     const stopped = Math.max(Math.abs(this.vL), Math.abs(this.vR)) < P.stoppedSpeed && Math.abs(this.refL) < P.refZero && Math.abs(this.refR) < P.refZero;
     const active = (this.kind === 'goto' && this.phase === 'drive') || (this.kind === 'turn' && this.phase === 'turn');
     const silent = !this.local && active && now - this.lastRx > P.watchdog;
+    // camera watchdog: a camera was seen, no accepted fix for camStale while driving / turning = same stop; only a
+    // new accepted fix resumes
+    this.camStale = !this.local && active && this.camSeen && now - this.lastCamOk > P.camStale;
     let cmd = { vL: 0, vR: 0 };
-    if (silent) { this.stalled = true; this.state = S.Idle; this.rot = false; }
+    if (silent || this.camStale) { this.stalled = true; this.state = S.Idle; this.rot = false; }
     else {
       if (this.stalled) { this.stalled = false; if (this.kind === 'goto') this.state = S.Moving; else if (this.kind === 'turn') this.state = S.Turning; }
       cmd = this.control(stopped, dt);
@@ -537,6 +547,73 @@ function testCamera() {
   r = T.onCamera(0.7, 0.5, 0, tImg + tt + 0.05, 0.04, now + tt + 0.05); check(r === CR.Accepted, 'the next timely fix is accepted again');
 }
 
+function testCamStale() {
+  console.log('\nTEST camera watchdog (no accepted fix for 1 s while driving or turning)');
+  const Hh = new Harness(801, pose(0.1, 0.5, 0)); const T = Hh.truck;
+  check(T.camAgeMs(Hh.t) === -1, 'before the first fix the telemetry field cam is -1');
+  Hh.run(0.3); Hh.send(gotoCmd(1, 0.9, 0.5, 0)); Hh.run(1.0);
+  const ageOn = T.camAgeMs(Hh.t);
+  check(T.state === S.Moving && !T.camStale && ageOn >= 0 && ageOn < 100, 'camera on: moving, cam age below 100 ms');
+  // the camera dies: fixes already on the way (age 40 ms + up to 15 ms network) still arrive
+  Hh.camOn = false; const ts = Hh.t; let tI = -1, tS = -1;
+  while (Hh.t - ts < 3) { Hh.tick(); if (tI < 0 && T.state === S.Idle) tI = Hh.t - ts; if (tI >= 0 && tS < 0 && Hh.trueSpeed() < 0.002) tS = Hh.t - ts; }
+  const p1 = { ...Hh.plant.pose }; Hh.run(1.0); const creep = dist(Hh.plant.pose, p1.x, p1.y);
+  console.log(`  camera off: idle ${f(tI, 3)} s later, wheels < 2 mm/s ${f(tS, 3)} s later, creep while stopped ${f(creep * 1000)} mm, cam age ${T.camAgeMs(Hh.t)} ms, repeats still arriving`);
+  check(tI > C.CAM_STALE_S - 0.01 && tI <= C.CAM_STALE_S + 0.065, 'state idle 1 s after the last accepted fix (not earlier)');
+  check(tS > 0 && tS <= C.CAM_STALE_S + 0.065 + 0.2 / C.MAX_ACCEL + 0.1, 'wheels stopped within 1 s + ramp-down');
+  check(creep < 0.0005 && T.stalled && T.camStale && T.seq === 1, 'robot stays put, goal kept (same seq), although cmd repeats keep coming');
+  check(T.camAgeMs(Hh.t) > 1000, 'cam age in telemetry keeps counting above 1000 ms');
+  const ack = Hh.send(gotoCmd(2, 0.9, 0.5, 0)); Hh.run(0.5);
+  check(ack && T.state === S.Idle && T.camStale && Hh.trueSpeed() < 0.002, 'a NEW command does not resume: still no camera, still stopped');
+  // resume rule: a new accepted fix
+  Hh.camOn = true; Hh.nextCam = Hh.t; const tr = Hh.t; let tM = -1;
+  while (Hh.t - tr < 1 && tM < 0) { Hh.tick(); if (T.state === S.Moving) tM = Hh.t - tr; }
+  const tt = Hh.runUntilArrived(2, 20);
+  console.log(`  camera back: moving ${f(tM, 3)} s later, arrived after ${f(tt)} s at ${f(dist(Hh.plant.pose, 0.9, 0.5) * 1000, 1)} mm (true) from the target`);
+  check(tM > 0 && tM <= 0.07 && !T.camStale, 'resumes with the first accepted fix');
+  check(tt > 0 && dist(Hh.plant.pose, 0.9, 0.5) < 0.010, 'then arrives (true position within 10 mm)');
+  // a turn is watched too (slowed down so that it needs more than 1 s)
+  const V = new Harness(803, pose(0.5, 0.5, 0)); V.run(0.3); const Pv = V.truck.P; Pv.cruise = 0.03; V.send(turnCmd(1, 3.0, 1)); V.run(0.3); V.camOn = false;
+  const v0 = V.t; let vI = -1; while (V.t - v0 < 3 && vI < 0) { V.tick(); if (V.truck.state === S.Idle) vI = V.t - v0; }
+  console.log(`  slow turn, camera off: idle ${f(vI, 3)} s later`);
+  check(vI > C.CAM_STALE_S - 0.01 && vI <= C.CAM_STALE_S + 0.065 && V.truck.camStale, 'a turn is stopped the same way');
+  // robots that never saw a camera keep working as before
+  const G = new Harness(804, pose(0.1, 0.5, 0)); G.camOn = false; G.send(gotoCmd(1, 0.9, 0.5, 0));
+  const tg = G.runUntilArrived(1, 20);
+  console.log(`  no camera ever: 0.8 m goto arrived after ${f(tg)} s, cam field ${G.truck.camAgeMs(G.t)}`);
+  check(tg > 2 && !G.truck.camStale && G.truck.camAgeMs(G.t) === -1, 'a robot that never saw a camera drives longer than 1 s and arrives (cam -1)');
+  const B = new Harness(805, pose(0.1, 0.5, 0)); B.camOn = false; B.truck.setPose(pose(0.1, 0.5, 0)); B.send(gotoCmd(1, 0.9, 0.5, 0));
+  check(B.runUntilArrived(1, 20) > 2 && B.truck.camAgeMs(B.t) === -1, 'a bench pose (setPose) does not arm the camera watchdog');
+  // a serial bench command is exempt, like the command watchdog
+  const L = new Harness(806, pose(0.1, 0.5, 0)); L.run(0.3); L.camOn = false; L.keepAlive = false;
+  const lc = gotoCmd(1, 0.9, 0.5, 0); lc.local = true; L.send(lc);
+  check(L.runUntilArrived(1, 20) > 2 && !L.truck.camStale, 'a serial bench command (local) is not stopped by the camera watchdog');
+  // dump keeps timing without a camera
+  const D = new Harness(807, pose(0.5, 0.5, 0)); D.run(0.3); D.camOn = false; D.send(simple(1, A.Dump));
+  const td = D.runUntilArrived(1, 6);
+  check(Math.abs(td - 4) < 0.011, 'a dump keeps timing without the camera (wheels are still anyway)');
+}
+
+function testCamOrder() {
+  console.log('\nTEST camera order check is bounded (camera clock stepped back)');
+  const T = new Truck(); T.begin(pose(0.5, 0.5, 0), 0, 0, 1.0);
+  let now = 1.0; for (let i = 0; i < 20; i++) { now += 0.005; T.step(now, 0, 0); }
+  const fix = (tImg) => { now += 0.033; T.step(now, 0, 0); return T.onCamera(0.5, 0.5, 0, tImg, 0.04, now); };
+  let r = fix(2000.0); check(r === CR.Initialised, 'first fix initialises');
+  r = fix(2000.033); check(r === CR.Accepted, 'next fix in order accepted');
+  // one late fix between good ones never adds up
+  let lone = true; for (let i = 0; i < 30; i++) { if (fix(1999.0) !== CR.RejectedOrder) lone = false; if (fix(2000.1 + 0.033 * i) !== CR.Accepted) lone = false; }
+  check(lone, 'single out-of-order fixes between good ones are always rejected (the count resets)');
+  // the clock steps back by 500 s
+  let k = 0, tb = 1500.0; r = CR.RejectedOrder;
+  while (r === CR.RejectedOrder && k < 50) { tb += 0.033; r = fix(tb); k++; }
+  console.log(`  clock 500 s back: accepted again at fix ${k} (${k - 1} rejected)`);
+  check(r === CR.Accepted && k === C.CAM_RELOCK_COUNT, 'after 10 fixes in a row from the stepped-back clock the order check re-bases and accepts');
+  tb += 0.033; r = fix(tb); check(r === CR.Accepted, 'the following fix on the new time base is accepted');
+  r = fix(tb - 0.1); check(r === CR.RejectedOrder, 'an out-of-order fix on the new time base is rejected again');
+  check(T.camAgeMs(now) >= 0 && T.camAgeMs(now) < 100, 'cam age follows the accepted fixes');
+}
+
 function testArcFloat32() {
   console.log('\nTEST odometry in float32 (ESP32 build): equal counts on both wheels, 200 ticks, distance estimate / truth');
   const R = Math.fround, P = Params();
@@ -553,6 +630,6 @@ function testArcFloat32() {
 }
 
 console.log(`motion_core JS mirror test: CONTROL_HZ ${C.CONTROL_HZ}, cruise ${C.CRUISE_SPEED} m/s, accel ${C.MAX_ACCEL} m/s^2, arrive ${C.ARRIVE_TOL_M * 1000} mm, turn tol ${C.HEADING_TOL_DEG} deg, fusion gain ${C.CAM_FUSION_GAIN}`);
-testSemantics(); testGoto(true); testGoto(false); testLine(); testTurn(false); testTurn(true); testSpeedLimit(); testWatchdog(); testCamera(); testArcFloat32();
+testSemantics(); testGoto(true); testGoto(false); testLine(); testTurn(false); testTurn(true); testSpeedLimit(); testWatchdog(); testCamera(); testCamStale(); testCamOrder(); testArcFloat32();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

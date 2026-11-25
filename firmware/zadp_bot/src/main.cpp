@@ -129,9 +129,12 @@ void setup() {
 #if BENCH_SIM
     Serial.printf("*** BENCH BUILD: motors, encoders and gyro are simulated; no hardware is driven ***\n");
 #endif
-    Serial.printf("FreeRTOS: control %d Hz (core %d prio %d), telemetry %d Hz, task watchdog %d ms, link-loss stop %.2f s\n",
-                  CONTROL_HZ, CTRL_TASK_CORE, CTRL_TASK_PRIO, TELEMETRY_HZ, TWDT_TIMEOUT_MS, (double)LINK_LOSS_STOP_S);
+    Serial.printf("FreeRTOS: control %d Hz (core %d prio %d), telemetry %d Hz, task watchdog %d ms, link-loss stop %.2f s, "
+                  "motor guard %d ms, camera watchdog %.1f s\n",
+                  CONTROL_HZ, CTRL_TASK_CORE, CTRL_TASK_PRIO, TELEMETRY_HZ, TWDT_TIMEOUT_MS, (double)LINK_LOSS_STOP_S,
+                  MOTOR_GUARD_MS, (double)CAM_STALE_S);
     twdtConfigure();
+    hw::motorGuardBegin();                                       // rule: the independent motor cut runs before any task can drive
 
     // telemetry first: the control task notifies it
     startTask(T_TEL, telemetryTask, TEL_TASK_PRIO, TEL_TASK_CORE);

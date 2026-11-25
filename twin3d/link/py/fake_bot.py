@@ -6,7 +6,8 @@ the go-to-point / turn controller and the command semantics of the firmware (fir
 motion_core.h, the same laws as bot/bot_controller.m and brain/brain_step.m). Contract: link/TOPICS.md.
 
 Per robot:  subscribes zadp/bot<N>/cmd and zadp/cam/pose (fuses its own fix: latency-compensated with the
-            message's age, gain P.cam.fusionGain, like the firmware), publishes zadp/bot<N>/telemetry at
+            message's age, gain P.cam.fusionGain, like the firmware; stops a drive / turn when the fixes stop
+            for 1 s, like the firmware's camera watchdog), publishes zadp/bot<N>/telemetry at
             P.link.telemetryHz and once at once when a new command arrives.
 As the camera (unless --no-cam): publishes zadp/cam/pose per robot at P.cam.rateHz: the true pose of
             P.cam.latency ago + noise (3 mm, 1 deg), with t (image time) and age.
@@ -88,6 +89,9 @@ class Num:
         self.MIN_GOTO = 0.02                            # firmware MIN_GOTO_SPEED (not a twin number)
         self.TURN_SLACK = 0.3                           # brain_step.m turnCmd wrap slack
         self.STOPPED = 2e-3                             # brain_step.m "stopped" wheel speed
+        self.CAM_STALE = 1.0                            # firmware CAM_STALE_S: camera watchdog (not a twin number)
+        self.CAM_RELOCK = 10                            # firmware CAM_RELOCK_COUNT: bound of the camera order check
+        self.CAM_AGE_MAX_MS = 99999                     # firmware CAM_AGE_REPORT_MAX_MS: cap of telemetry `cam`
 
 
 class Bot:
@@ -112,6 +116,10 @@ class Bot:
         self.t = 0.0                         # sim time
         self.hist = [(0.0, list(pose), list(pose))]   # (t, true pose, odom) for the camera latency
         self.last_cam_t = None
+        self.order_run = 0                   # camera fixes rejected in a row by the order check
+        self.cam_seen = False                # a camera fix was accepted
+        self.last_cam_ok = 0.0               # sim time of the last accepted fix
+        self.cam_stale = False
 
     # ---------------------------------------------------------------- commands (motion_core.h onCommand)
     def on_cmd(self, c):
@@ -260,7 +268,11 @@ class Bot:
     # ---------------------------------------------------------------- physics (bot_step.m, bot_odometry.m)
     def step(self, dt, silent):
         N = self.N
-        if silent:
+        # rule (motion_core.h camera watchdog): once a fix was accepted, no accepted fix for CAM_STALE while driving /
+        # turning = the same stop as the command watchdog; only a new accepted fix (fuse) resumes. Sim time, so a
+        # stalled process does not count. A robot that never got a fix (--no-fuse, no camera) is not watched.
+        self.cam_stale = self.cam_seen and self.watchdog_active() and self.t - self.last_cam_ok > N.CAM_STALE
+        if silent or self.cam_stale:
             cmd = (0.0, 0.0)
             self.stalled = True              # watchdog stop: the goal is kept, the command resumes when lines return
             self.state = 'idle'
@@ -320,7 +332,12 @@ class Bot:
         t_img = float(p.get('t') or 0)
         if t_img > 0:
             if self.last_cam_t is not None and t_img <= self.last_cam_t:
-                return
+                # rule: duplicate / out of order = dropped; CAM_RELOCK of them in a row = the camera clock stepped
+                # back: take the new time base and go on (one fix in order resets the count)
+                self.order_run += 1
+                if self.order_run < N.CAM_RELOCK:
+                    return
+            self.order_run = 0
             self.last_cam_t = t_img
         age = p.get('age')
         lag = float(age) + N.NET_DELAY if age is not None and float(age) >= 0 else N.CAM_LATENCY
@@ -337,11 +354,19 @@ class Bot:
         e = [z[0] - self.est[0], z[1] - self.est[1], wrap(z[2] - self.est[2])]
         g = N.FUSION_GAIN
         self.est = [self.est[0] + g * e[0], self.est[1] + g * e[1], wrap(self.est[2] + g * e[2])]
+        self.cam_seen = True                 # accepted: feeds the camera watchdog
+        self.last_cam_ok = self.t
+
+    def cam_age_ms(self):
+        """Telemetry `cam`: ms since the last accepted camera fix (capped), -1 = none yet."""
+        if not self.cam_seen:
+            return -1
+        return int(min(max((self.t - self.last_cam_ok) * 1000.0, 0.0), self.N.CAM_AGE_MAX_MS))
 
     def telemetry(self):
         return {'id': self.id, 'seq': self.seq, 'encL': self.enc[0], 'encR': self.enc[1],
                 'x': round(self.est[0], 5), 'y': round(self.est[1], 5), 'heading': round(wrap(self.est[2]), 5),
-                'state': self.state}
+                'state': self.state, 'cam': self.cam_age_ms()}
 
     def cam(self):
         """Camera message: the true pose of P.cam.latency ago; its age field = latency - netDelay (the rest is

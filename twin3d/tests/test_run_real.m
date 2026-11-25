@@ -135,8 +135,17 @@ if W.t >= t && isgraphics(fig), close(fig); end
 end
 
 function pids = listPython()
-% PIDs of running python.exe processes (to prove nothing was left behind)
-[~, out] = system('tasklist /NH /FO CSV');
-tok = regexp(out, '"python[^"]*\.exe","(\d+)"', 'tokens');
+% PIDs of the running link helpers (to prove no helper of this run was left behind).
+% rule: only a python process whose command line names a script in twin3d\link\py counts (the folder link_launch
+% starts every helper from). Any other Python on this PC (MCP servers, editors) is not a helper and is ignored.
+% rule: a failed process query is an error, never "no helpers".
+pyDir = lower(fullfile(fileparts(which('link_launch')), 'py'));
+assert(~isempty(which('link_launch')) && ~contains(pyDir, ''''), 'listPython: link\py folder not usable: %s', pyDir);
+cmd = ['powershell -NoProfile -NonInteractive -Command "Get-CimInstance Win32_Process | Where-Object { ' ...
+    '$_.Name -like ''python*'' -and $_.CommandLine -and $_.CommandLine.ToLower().Contains(''' pyDir ''') } | ' ...
+    'ForEach-Object { $_.ProcessId }"'];
+[st, out] = system(cmd);
+assert(st == 0, 'listPython: the process query failed (status %d): %s', st, strtrim(out));
+tok = regexp(out, '^\s*(\d+)\s*$', 'tokens', 'lineanchors');
 pids = cellfun(@(c) str2double(c{1}), tok);
 end

@@ -26,6 +26,9 @@ It waits until the camera sees the 4 corner markers, waits for telemetry and a c
 each REAL robot i stands on parking slot P_i (`P.link.parkTol`, `P.link.parkTolDeg`; the message names any that does
 not), then runs `brain_run_linked` with `syncToReal` and a live 3D view at the camera poses. An error, Ctrl+C or
 closing the view sends stop to all robots (twice) and kills every helper it started. One printed line per check.
+The run also ends by itself (line `ended early, all robots stopped: <reason>`): robot offline or silent, no camera
+pose of a robot for 1 s (`link:camLost`), a robot more than 0.10 m from its twin for 1 s (`link:diverged`), camera
+helper exited or logged an error (`link:aborted`, every mode). Numbers in `P.link`, table in `TOPICS.md` "Run end / abort".
 Launch order: `../HANDOVER.md` section 14.
 
 `run_real('dry', opts)` is the same code path without hardware: loopback bridge, `fake_bot.py` stand-ins for the real
@@ -96,7 +99,7 @@ private free port (`test_run_real` g), so they never publish where a real robot 
 | `link_open`, `link_send_cmd`, `link_poll`, `link_close` | MATLAB side, base MATLAB only (`tcpclient`, `jsonencode`, `jsondecode`) |
 | `link_keepalive`, `link_stop_all` | heartbeat to the bridge, stop everybody |
 | `link_from_brain(W, Wprev, L)` | route-step changes -> commands (drive pieces of one drive = one `goto`; turns carry `dir` and `tol`) |
-| `brain_run_linked(plan, P, opts)` | `brain_run` with the link, paced to real time; `syncToReal`, `onStep` (live view), `abortFcn`; ends on a robot `offline` / silent |
+| `brain_run_linked(plan, P, opts)` | `brain_run` with the link, paced to real time; `syncToReal`, `onStep` (live view), `abortFcn`; ends on a robot `offline` / silent, camera loss (`link:camLost`), twin-vs-real divergence (`link:diverged`) |
 | `link_launch`, `link_kill`, `link_python` | start / stop the helper processes (PID checked; `bots`, `simBots`, `realBots`, `camBots`), find Python |
 
 ## Timing in one line

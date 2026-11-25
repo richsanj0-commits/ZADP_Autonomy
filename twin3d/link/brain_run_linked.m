@@ -6,16 +6,22 @@ function [W, log, lk] = brain_run_linked(plan, P, opts)
 %   real time), because the real robots cannot go faster.
 %   [W, log, lk] = brain_run_linked(plan, P, opts)
 %   opts: link (an open link from link_open; default: opens one with opts.host/port and closes it at the end),
-%         maxTime (s of sim time, default 30), seed (1), syncToReal (default false), holdTimeout (s, 20),
-%         keepAlive (s, heartbeat period to the bridge, default P.link.heartbeat), logDt (s, 0.1), readyTimeout
-%         (s, P.link.readyTimeout), camStale (s, 0.2: an older camera pose is logged as NaN and counted in
-%         lk.camStale), telStale (s, 2: a robot whose telemetry stopped this long, or that reports 'offline' (its
-%         MQTT last will), ends the run with an error), maxLagWarn (s, P.link.hostTimeout: warn when a brain
+%         maxTime (s of sim time, default 30), seed (1), syncToReal (default false), holdTimeout (s,
+%         P.link.holdTimeout), keepAlive (s, heartbeat period to the bridge, default P.link.heartbeat), logDt (s,
+%         P.link.logDt), readyTimeout (s, P.link.readyTimeout), camStale (s, P.link.camStale: an older camera pose
+%         is logged as NaN and counted in lk.camStale), telStale (s, P.link.telStale: a robot whose telemetry
+%         stopped this long, or that reports 'offline' (its MQTT last will), ends the run with an error),
+%         camLossTime (s, P.link.camLossTime: no camera pose of a robot this long ends the run with error
+%         'link:camLost'), divergeLimit (m) and divergeTime (s) (P.link: a robot whose twin-vs-real position error,
+%         from fresh camera poses, stays above the limit this long ends the run with error 'link:diverged'),
+%         maxLagWarn (s, P.link.hostTimeout: warn when a brain
 %         step stalled longer; the bridge keeps repeating the commands for hostTimeout, after that the robots'
 %         watchdog stops them), onStep (function onStep(W, cam, tel), called every logDt with the latest camera
 %         pose and telemetry per robot (cell arrays, {} = none yet), e.g. a live view), abortFcn (function
-%         returning true to end the run with error 'link:aborted', e.g. the view's figure was closed), plus the
-%         brain_run options. Any error during the run sends stop to every robot before it is rethrown.
+%         returning true, or a non-empty char reason, to end the run with error 'link:aborted', e.g. the view's
+%         figure was closed or the camera helper died), plus the
+%         brain_run options. Any error during the run sends stop to every robot before it is rethrown; no command
+%         is sent after that, so the robots' command watchdog (P.link.watchdog) holds them stopped.
 %   syncToReal = true: the twin is HELD at the end of each step (the robot's next step does not start; a dump
 %         does not end) until the real robot reports state "arrived" with the seq of that step's command, or
 %         holdTimeout passes (then it is released and counted in lk.holdTimeouts).
@@ -24,11 +30,13 @@ function [W, log, lk] = brain_run_linked(plan, P, opts)
 %         the real robot), err (N-by-nb, m), herr (N-by-nb, rad), cmds (every command with tFirst, tAck,
 %         latencyMs), latencyMs, nCmd, nTel, nCam, holdTime (s per robot), holdTimeouts, maxLag (s, longest stall of the brain,
 %         e.g. planning, that the clock absorbed), mode (bridge mode), and summary: meanErr, worstErr (m, per robot
-%         and overall), meanLatencyMs, maxLatencyMs.
+%         and overall), meanLatencyMs, maxLatencyMs, endReason ('completed': a run that ended early has no lk, its
+%         reason is the error identifier: link:offline, link:silent, link:camLost, link:diverged, link:aborted).
 if nargin < 3, opts = struct(); end
-def = struct('link', [], 'maxTime', 30, 'seed', 1, 'syncToReal', false, 'holdTimeout', 20, 'keepAlive', P.link.heartbeat, ...
-    'logDt', 0.1, 'readyTimeout', P.link.readyTimeout, 'host', '127.0.0.1', 'port', P.link.bridgePort, 'camStale', 0.2, ...
-    'telStale', 2, 'maxLagWarn', P.link.hostTimeout, 'onStep', [], 'abortFcn', []);
+def = struct('link', [], 'maxTime', 30, 'seed', 1, 'syncToReal', false, 'holdTimeout', P.link.holdTimeout, 'keepAlive', P.link.heartbeat, ...
+    'logDt', P.link.logDt, 'readyTimeout', P.link.readyTimeout, 'host', '127.0.0.1', 'port', P.link.bridgePort, 'camStale', P.link.camStale, ...
+    'telStale', P.link.telStale, 'camLossTime', P.link.camLossTime, 'divergeLimit', P.link.divergeLimit, ...
+    'divergeTime', P.link.divergeTime, 'maxLagWarn', P.link.hostTimeout, 'onStep', [], 'abortFcn', []);
 f = fieldnames(def);
 for i = 1:numel(f), if ~isfield(opts, f{i}), opts.(f{i}) = def.(f{i}); end, end
 nb = P.bot.count;
@@ -39,12 +47,13 @@ cleanup = onCleanup(@() closeIfOwn(own, L));
 % ---- state shared by the hooks (nested functions)
 cmdLog = []; latest = cell(1, nb); latestCam = cell(1, nb);
 wall0 = NaN; nextLog = 0; maxLag = 0; nStale = zeros(1, nb); holdTime = zeros(1, nb); holdTimeouts = 0; warned = containers.Map('KeyType', 'char', 'ValueType', 'logical');
+tOver = nan(1, nb);                                       % link clock time since robot k is over divergeLimit (NaN = not over)
 nLog = ceil(opts.maxTime/opts.logDt) + 2; nl = 0;
 lkT = zeros(nLog, 1); lkTwin = nan(nLog, 3, nb); lkReal = nan(nLog, 3, nb);
 
 waitReady();
 
-ro = rmfield(opts, intersect(fieldnames(opts), {'link', 'syncToReal', 'holdTimeout', 'keepAlive', 'readyTimeout', 'host', 'port', 'camStale', 'telStale', 'maxLagWarn', 'onStep', 'abortFcn'}));
+ro = rmfield(opts, intersect(fieldnames(opts), {'link', 'syncToReal', 'holdTimeout', 'keepAlive', 'readyTimeout', 'host', 'port', 'camStale', 'telStale', 'camLossTime', 'divergeLimit', 'divergeTime', 'maxLagWarn', 'onStep', 'abortFcn'}));
 ro.beforeStep = @beforeStep; ro.afterStep = @afterStep;
 try
     [W, log] = brain_run(plan, P, ro);
@@ -73,6 +82,7 @@ lk.cmds = cmdLog; lk.nCmd = numel(cmdLog);
 lk.nTel = L.st('nTel'); lk.nCam = L.st('nCam'); lk.mode = L.st('mode');
 lk.latencyMs = []; if ~isempty(cmdLog), lk.latencyMs = [cmdLog.latencyMs]; lk.latencyMs = lk.latencyMs(~isnan(lk.latencyMs)); end
 lk.holdTime = holdTime; lk.holdTimeouts = holdTimeouts; lk.maxLag = maxLag; lk.syncToReal = opts.syncToReal; lk.camStale = nStale;
+lk.endReason = 'completed';                               % every early end is an error (see checkAlive, checkCamera, abortFcn)
 lk.meanErrBot = mean(lk.err, 1, 'omitnan'); lk.worstErrBot = max(lk.err, [], 1, 'omitnan');
 lk.meanErr = mean(lk.err(:), 'omitnan'); lk.worstErr = max(lk.err(:), [], 'omitnan');
 lk.meanLatencyMs = mean(lk.latencyMs); lk.maxLatencyMs = max([lk.latencyMs, NaN]);
@@ -129,8 +139,12 @@ lk.meanLatencyMs = mean(lk.latencyMs); lk.maxLatencyMs = max([lk.latencyMs, NaN]
         if lag > 0.05, maxLag = max(maxLag, lag); wall0 = wall0 + lag; end
         pump(); link_keepalive(L, opts.keepAlive);
         checkAlive();
-        if ~isempty(opts.abortFcn) && opts.abortFcn()
-            error('link:aborted', 'run aborted (view closed or abort requested) at t = %.1f s', W.t);
+        checkCamera(W);
+        if ~isempty(opts.abortFcn)
+            % rule: abortFcn returns true / false, or a char reason ('' = go on) that is put in the error message
+            ab = opts.abortFcn(); why = 'view closed or abort requested';
+            if ischar(ab), why = ab; ab = ~isempty(ab); end
+            if ab, error('link:aborted', 'run aborted (%s) at t = %.1f s', why, W.t); end
         end
         if W.t >= nextLog - 1e-9 && ~isempty(opts.onStep), opts.onStep(W, latestCam, latest); end
         if W.t >= nextLog - 1e-9
@@ -153,7 +167,8 @@ lk.meanLatencyMs = mean(lk.latencyMs); lk.maxLatencyMs = max([lk.latencyMs, NaN]
     end
 
     function checkAlive()
-        % rule: a robot that went offline (MQTT last will) or silent ends the run (the twin would lead a ghost)
+        % rule: a robot that went offline (MQTT last will) or silent ends the run (the twin would lead a ghost).
+        % An error here (and in checkCamera / abortFcn) is caught above: stop to every robot, then nothing more is sent
         tNow = toc(L.t0);
         for k = 1:nb
             tl = latest{k};
@@ -163,6 +178,36 @@ lk.meanLatencyMs = mean(lk.latencyMs); lk.maxLatencyMs = max([lk.latencyMs, NaN]
             end
             if tNow - tl.tRecv > opts.telStale
                 error('link:silent', 'no telemetry from robot %d for %.1f s', k, tNow - tl.tRecv);
+            end
+        end
+    end
+
+    function checkCamera(W)
+        % called right after pump(), so a pose that arrived during a brain stall is fresh here
+        tNow = toc(L.t0);
+        for k = 1:nb
+            c = latestCam{k};
+            if isempty(c), continue; end                  % cannot happen after waitReady
+            age = tNow - c.tRecv;
+            % rule: a robot the camera has not seen for camLossTime ends the run (camera node dead, marker hidden,
+            % robot out of view): the twin would lead a robot nobody sees
+            if age > opts.camLossTime
+                error('link:camLost', 'no camera pose of robot %d for %.1f s (limit %.1f s) at t = %.1f s', ...
+                    k, age, opts.camLossTime, W.t);
+            end
+            % rule: only a fresh pose is compared with the twin; a stale one neither starts nor clears the timer
+            if age > opts.camStale, continue; end
+            e = hypot(W.bots(k).s.pose(1) - c.x, W.bots(k).s.pose(2) - c.y);
+            % rule: a real robot more than divergeLimit from its twin for divergeTime ends the run (the twin's
+            % collision-free plan no longer describes the floor). One fresh pose inside the limit clears the timer.
+            if ~(e > opts.divergeLimit)
+                tOver(k) = NaN;
+            elseif isnan(tOver(k))
+                tOver(k) = tNow;
+            elseif tNow - tOver(k) > opts.divergeTime
+                error('link:diverged', ['robot %d is %.0f mm from its twin, over %.0f mm for %.1f s, at t = %.1f s ' ...
+                    '(twin x %.3f y %.3f, camera x %.3f y %.3f)'], k, 1000*e, 1000*opts.divergeLimit, tNow - tOver(k), ...
+                    W.t, W.bots(k).s.pose(1), W.bots(k).s.pose(2), c.x, c.y);
             end
         end
     end

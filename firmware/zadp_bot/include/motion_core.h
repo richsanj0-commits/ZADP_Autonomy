@@ -54,6 +54,7 @@ struct Params {
     float camMaxAge = CAM_MAX_AGE_S;
     float camMaxJump = CAM_MAX_JUMP_M, camMaxJumpRad = deg2radf(CAM_MAX_JUMP_DEG);
     int camRelock = CAM_RELOCK_COUNT;
+    float camStale = CAM_STALE_S;
     // wheel loop
     float dt = 1.0f / CONTROL_HZ;
     int velWindow = VEL_WINDOW;
@@ -276,7 +277,11 @@ public:
     // default lag is used), now = local seconds. The fix shows the robot `age + netDelay` ago.
     CamResult onCamera(float x, float y, float h, double tImage, float age, double now) {
         if (tImage > 0.0) {
-            if (haveT_ && tImage <= lastT_) return CamResult::RejectedOrder;   // rule: duplicate / out of order
+            // rule: duplicate / out of order = rejected. rule (bounded): camRelock such fixes in a row mean the
+            // camera clock stepped back (clock set, camera PC restarted): take the new time base and go on, so the
+            // order check can never lock the camera out for good. One in-order fix resets the count.
+            if (haveT_ && tImage <= lastT_ && ++orderRun_ < P.camRelock) return CamResult::RejectedOrder;
+            orderRun_ = 0;
             haveT_ = true; lastT_ = tImage;
         }
         float lag = age >= 0.f ? age + P.camNetDelay : P.camDefaultLag;
@@ -290,14 +295,19 @@ public:
         float hz = wrapAngle(h);
         float cz = std::cos(hz), sz = std::sin(hz);
         Pose z = makePose(x + cz * rx - sz * ry, y + sz * rx + cz * ry, wrapAngle(hz + dth));
-        if (!camInit_) { est_ = z; camInit_ = true; return CamResult::Initialised; }  // rule: first fix sets the pose
+        // rule: first fix sets the pose. Every accepted fix (first, fused, relock) stamps lastCamOk_ (camera watchdog)
+        if (!camInit_) { est_ = z; camInit_ = true; camSeen_ = true; lastCamOk_ = now; return CamResult::Initialised; }
         float ex = z.x - est_.x, ey = z.y - est_.y, eh = wrapAngle(z.th - est_.th);
         if (std::sqrt(ex * ex + ey * ey) > P.camMaxJump || std::fabs(eh) > P.camMaxJumpRad) {
             // rule: an implausible jump is rejected, unless the camera insists (robot moved by hand)
-            if (++rejectRun_ >= P.camRelock) { est_ = z; rejectRun_ = 0; return CamResult::Relocked; }
+            if (++rejectRun_ >= P.camRelock) {
+                est_ = z; rejectRun_ = 0; camSeen_ = true; lastCamOk_ = now;
+                return CamResult::Relocked;
+            }
             return CamResult::RejectedJump;
         }
         rejectRun_ = 0;
+        camSeen_ = true; lastCamOk_ = now;
 #if defined(BENCH_SIM) && BENCH_SIM
         // rule (bench build): the camera fix is this robot's own estimate echoed by bench_cam.py, so blending it
         // would only add the error of the assumed round-trip delay. First fix and relock (start-pose reset) stay.
@@ -312,6 +322,7 @@ public:
     void setRaw(int pwmL, int pwmR, double seconds, double now) {
         rawL_ = (float)pwmL; rawR_ = (float)pwmR; rawUntil_ = now + seconds; raw_ = seconds > 0.0;
     }
+    // rule: a pose typed on the bench is not a camera: it does not arm the camera watchdog (camSeen_ unchanged)
     void setPose(const Pose& p) { est_ = p; camInit_ = true; }
 
     // One control tick at time `now` (s) with the cumulative encoder counts.
@@ -344,8 +355,13 @@ public:
         // resume when messages return (dump and braking carry on: the wheels are commanded to zero there anyway)
         bool active = (kind_ == Kind::Goto && phase_ == Phase::Drive) || (kind_ == Kind::Turn && phase_ == Phase::Turn);
         bool silent = !local_ && active && (now - lastRx_ > P.watchdog);
+        // rule (camera watchdog): once a camera fix was accepted, no accepted fix for camStale (1 s) while driving /
+        // turning = the same stop as the command watchdog (wheels to zero, idle, goal kept). Resume rule: ONLY a new
+        // accepted fix (onCamera stamps lastCamOk_) lets the command go on; a new command does not. A robot that
+        // never saw a camera (bot_ping, floor checks) and a serial bench command are not watched.
+        camStale_ = !local_ && active && camSeen_ && (now - lastCamOk_ > P.camStale);
         WheelCmd cmd;
-        if (silent) {
+        if (silent || camStale_) {
             stalled_ = true;
             state_ = State::Idle;
             rot_ = false;
@@ -379,6 +395,13 @@ public:
     bool rawActive() const { return raw_; }
     bool localActive() const { return local_; }                 // current command came from the serial bench
     bool camInitialised() const { return camInit_; }
+    bool camStale() const { return camStale_; }                 // stopped by the camera watchdog in the last step
+    // telemetry `cam`: ms since the last accepted camera fix, capped; -1 = no camera fix accepted yet
+    int32_t camAgeMs(double now) const {
+        if (!camSeen_) return -1;
+        double ms = (now - lastCamOk_) * 1000.0;
+        return ms < 0.0 ? 0 : (ms > (double)CAM_AGE_REPORT_MAX_MS ? (int32_t)CAM_AGE_REPORT_MAX_MS : (int32_t)ms);
+    }
     float pwmL() const { return pwmL_; }
     float pwmR() const { return pwmR_; }
     float refL() const { return refL_; }
@@ -494,8 +517,9 @@ private:
     double lastRx_ = -1e9;
 
     bool camInit_ = false, haveT_ = false;
-    double lastT_ = 0.0;
-    int rejectRun_ = 0;
+    bool camSeen_ = false, camStale_ = false;                   // camSeen_: a camera fix was accepted (not setPose)
+    double lastT_ = 0.0, lastCamOk_ = 0.0;                      // lastCamOk_: local time of the last accepted fix
+    int rejectRun_ = 0, orderRun_ = 0;
 
     bool raw_ = false;
     float rawL_ = 0.f, rawR_ = 0.f;

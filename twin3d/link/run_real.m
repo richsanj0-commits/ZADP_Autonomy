@@ -39,6 +39,10 @@ function R = run_real(mode, opts)
 %        does not (a simulated robot starts on its slot by construction)
 %     6. brain_run_linked with syncToReal and the live 3D view drawn at the REAL (camera) poses
 %   Any error, Ctrl+C or closing the view sends stop to every robot, closes the link and kills every helper process.
+%   The run ends early (one line "ended early ..." with the reason, then the error) when a robot goes offline or silent,
+%   the camera loses a robot for P.link.camLossTime (link:camLost), a robot stays more than P.link.divergeLimit from its
+%   twin for P.link.divergeTime (link:diverged), or the camera helper process exits or logs an error (link:aborted;
+%   every mode, checked every P.link.camCheckDt).
 %   R: mode, realBots, simBots, lk, mon (twin safety monitors), log, procs, checks (preflight / corners (bench: bench) / ready flags,
 %   park = bot, dist, headingDeg per real robot), camLog.
 if nargin < 1 || isempty(mode), mode = 'real'; end
@@ -226,11 +230,18 @@ world_view(h, 'top');
 tAbortChk = tic;
 nView = 0; tView = -Inf; nSpots = numel(brain_init(plan, P, opts.seed).spots);
 say('running %g s (syncToReal %d); close the view or press Ctrl+C to stop all robots', opts.maxTime, opts.syncToReal);
-[W, log, lk] = brain_run_linked(plan, P, struct('link', L, 'maxTime', opts.maxTime, 'seed', opts.seed, ...
-    'syncToReal', opts.syncToReal, 'onStep', @onStep, 'abortFcn', @isAborted));
+try
+    [W, log, lk] = brain_run_linked(plan, P, struct('link', L, 'maxTime', opts.maxTime, 'seed', opts.seed, ...
+        'syncToReal', opts.syncToReal, 'onStep', @onStep, 'abortFcn', @isAborted));
+catch runErr
+    % rule: a run that ended early prints its end reason (link:offline, link:silent, link:camLost, link:diverged,
+    % link:aborted) before the error goes on; brain_run_linked has sent stop already, the cleanup stops again
+    say('ended early, all robots stopped: %s: %s', runErr.identifier, runErr.message);
+    rethrow(runErr);
+end
 R.lk = lk; R.log = log; R.mon = log.mon; R.W = W; R.nView = nView;
-say('done: %d commands, twin-vs-real error mean %.1f mm, worst %.1f mm, latency mean %.1f ms, hold timeouts %d, twin monitors rr %d pile %d bound %d deadlock %d', ...
-    lk.nCmd, 1000*lk.meanErr, 1000*lk.worstErr, lk.meanLatencyMs, lk.holdTimeouts, log.mon.rrOverlapSteps, ...
+say('done (end reason %s): %d commands, twin-vs-real error mean %.1f mm, worst %.1f mm, latency mean %.1f ms, hold timeouts %d, twin monitors rr %d pile %d bound %d deadlock %d', ...
+    lk.endReason, lk.nCmd, 1000*lk.meanErr, 1000*lk.worstErr, lk.meanLatencyMs, lk.holdTimeouts, log.mon.rrOverlapSteps, ...
     log.mon.pileHitSteps, log.mon.boundSteps, log.mon.deadlocks);
 R.camLog = readLog(procs.logs.cam);
 
@@ -253,11 +264,35 @@ R.camLog = readLog(procs.logs.cam);
 
     function a = isAborted()
         a = isKey(ctx, 'abort');                          % set by closeView: brain_run_linked ends with link:aborted
-        % rule: bench only: bench_cam.py logs ERROR when a board restarted mid-run (the echo cannot correct a boot pose):
-        % end the run (log checked once a second; the log is small)
-        if ~a && bench && toc(tAbortChk) > 1
+        % rule: every mode has a camera helper (aruco_node.py, --sim in dry, bench_cam.py in bench). When it has exited
+        % or logged an error the robots have no camera any more: end the run. The char reason goes into the
+        % link:aborted message. Checked every P.link.camCheckDt (the log is small).
+        if ~a && toc(tAbortChk) > P.link.camCheckDt
             tAbortChk = tic;
-            a = contains(readLog(procs.logs.cam), 'ERROR');
+            a = camFault();
+        end
+    end
+
+    function why = camFault()
+        % '' = camera helper healthy, else the reason
+        why = '';
+        txt = readLog(procs.logs.cam);
+        % rule: bench_cam.py logs the word ERROR for any failure (e.g. a board restarted mid-run: the echo cannot
+        % correct a boot pose); aruco_node.py logs its own failures as "aruco_node: ERROR". An uncaught Python
+        % exception leaves a Traceback in the log.
+        word = 'aruco_node: ERROR';
+        if bench, word = 'ERROR'; end
+        hit = regexp(txt, ['[^\r\n]*(' word '|Traceback)[^\r\n]*'], 'match', 'once');
+        if ~isempty(hit)
+            why = sprintf('camera helper error in %s: %s', procs.logs.cam, strtrim(hit));
+            return
+        end
+        % rule: link_launch starts the camera helper last, so it is the last process object
+        gone = false;
+        try, gone = procs.objs{end}.HasExited; catch, end
+        if gone
+            why = sprintf('camera helper process exited (camera unplugged, video ended, killed?). Last log lines:\n%s', ...
+                lastLines(txt, 4));
         end
     end
 

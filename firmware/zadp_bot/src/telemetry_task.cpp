@@ -8,11 +8,14 @@
 namespace app {
 
 int formatTelemetry(const Snapshot& s, char* buf, size_t size) {
-    // contract: {id, seq, encL, encR, x, y, heading, state}
+    // contract: {id, seq, encL, encR, x, y, heading, state, cam}
+    // rule: `cam` is added at the END (a reader of the first 8 fields is not disturbed): ms since the last accepted
+    // camera fix, capped at CAM_AGE_REPORT_MAX_MS, -1 = no fix accepted yet
     int n = snprintf(buf, size,
-                     "{\"id\":%d,\"seq\":%lu,\"encL\":%ld,\"encR\":%ld,\"x\":%.5f,\"y\":%.5f,\"heading\":%.5f,\"state\":\"%s\"}",
+                     "{\"id\":%d,\"seq\":%lu,\"encL\":%ld,\"encR\":%ld,\"x\":%.5f,\"y\":%.5f,\"heading\":%.5f,\"state\":\"%s\","
+                     "\"cam\":%ld}",
                      BOT_ID, (unsigned long)s.seq, (long)s.encL, (long)s.encR, (double)s.x, (double)s.y, (double)s.h,
-                     zadp::stateName(s.state));
+                     zadp::stateName(s.state), (long)s.camAgeMs);
     return (n > 0 && n < (int)size) ? n : -1;
 }
 

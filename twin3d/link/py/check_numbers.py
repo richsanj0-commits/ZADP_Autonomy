@@ -49,7 +49,11 @@ TABLE = [
     ('INIT_HEADING', 'brain.parking[*][2]', 1e-6),
 ]
 # firmware-only constants that fake_bot.py (Num) copies: config.h name -> fake_bot value
-FW_ONLY = [('MIN_GOTO_SPEED', 0.02), ('TURN_WRAP_SLACK', 0.3), ('STOPPED_SPEED', 2e-3)]
+FW_ONLY = [('MIN_GOTO_SPEED', 0.02), ('TURN_WRAP_SLACK', 0.3), ('STOPPED_SPEED', 2e-3),
+           ('CAM_STALE_S', 1.0), ('CAM_RELOCK_COUNT', 10), ('CAM_AGE_REPORT_MAX_MS', 99999)]
+# the same constants in the JS mirror of motion_core.h (test/host/js_mirror/mirror_test.js, object C)
+JS_MIRROR = os.path.join(ROOT, 'firmware', 'zadp_bot', 'test', 'host', 'js_mirror', 'mirror_test.js')
+JS_ONLY = ['CAM_STALE_S', 'CAM_RELOCK_COUNT', 'CAM_AGE_REPORT_MAX_MS', 'CAM_MAX_AGE_S', 'WATCHDOG_S']
 
 
 def parse_header(path):
@@ -105,6 +109,15 @@ def main():
     row('CPR mean', cpr, 'bot.encoderCPR', C['bot']['encoderCPR'], 0.005)
     for name, v in FW_ONLY:
         row(name, D[name][0], 'fake_bot.py', v, 1e-9)
+    # rule: fake_bot.py must really carry these values (read from its source, not only from the table above)
+    fb = open(os.path.join(HERE, 'fake_bot.py'), encoding='utf-8').read()
+    for name, attr in (('CAM_STALE_S', 'CAM_STALE'), ('CAM_RELOCK_COUNT', 'CAM_RELOCK'), ('CAM_AGE_REPORT_MAX_MS', 'CAM_AGE_MAX_MS')):
+        m = re.search(r'self\.%s\s*=\s*([-0-9.eE]+)' % attr, fb)
+        row(name, D[name][0], 'fake_bot.Num.' + attr, float(m.group(1)) if m else float('nan'), 1e-9)
+    js = open(JS_MIRROR, encoding='utf-8').read()
+    for name in JS_ONLY:
+        m = re.search(r'\b%s:\s*([-0-9.eE]+)' % name, js)
+        row(name, D[name][0], 'mirror_test.js', float(m.group(1)) if m else float('nan'), 1e-9)
     # topics
     h = open(a.header, encoding='utf-8').read()
     for fmt, key in (('"zadp/bot" ZADP_STR(BOT_ID) "/cmd"', 'topicCmd'), ('"zadp/bot" ZADP_STR(BOT_ID) "/telemetry"', 'topicTelemetry')):

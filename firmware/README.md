@@ -87,7 +87,8 @@ watchdog and starts the tasks; `loop()` deletes itself. Numbers: `include/config
 
 | Task | Core | Prio | Rate | Stack (B) | Owns |
 |---|---|---|---|---|---|
-| `zadp_ctrl` | 1 | 20 | 200 Hz, `vTaskDelayUntil` | 4096 | encoders, `zadp::Truck`, PWM, 300 ms command watchdog, link-loss stop, gyro sign check; feeds the task watchdog; never blocks |
+| `zadp_ctrl` | 1 | 20 | 200 Hz, `vTaskDelayUntil` | 4096 | encoders, `zadp::Truck`, PWM, 300 ms command watchdog, 1 s camera watchdog, link-loss stop, gyro sign check; feeds the task watchdog and the motor guard; never blocks |
+| (esp_timer task) | 0 | 22 | 10 ms timer | system | motor guard callback (`motors.cpp`): zeroes both motor outputs when `zadp_ctrl` has not ticked for 50 ms |
 | `zadp_gyro` | 1 | 10 | 5 ms | 3072 | only if a gyro was found: I2C read, rate -> atomics (the control task never touches I2C; readings older than 20 ms are ignored) |
 | `zadp_tel` | 0 | 6 | 20 Hz + at once on a new seq | 4096 | telemetry JSON through the comms lock |
 | `zadp_comms` | 0 | 5 | 5 ms (50 ms while WiFi is down) | 6144 | WiFi, PubSubClient (mutex), connect / backoff, last will, JSON parsing, status on connect, heartbeat |
@@ -98,7 +99,13 @@ Data flow: `ctrlQ` (8, FIFO, senders never wait) comms / console -> control; `ca
 comms -> control; `snapQ` (1, overwrite / peek) control -> everyone else; task notification control -> telemetry
 (ack); event group `linkEvents` (WiFi up, MQTT up); atomic `commsAliveMs` heartbeat; `mqttMutex` around PubSubClient.
 
-Safety: motors short-braked first thing in `setup()`; 300 ms command watchdog stops a drive or turn; MQTT down or the
+Safety: motors short-braked first thing in `setup()`; 300 ms command watchdog stops a drive or turn; camera watchdog
+(`CAM_STALE_S` 1 s): once a camera fix was accepted, a drive or turn stops the same way when no fix was accepted for
+1 s and resumes with the next accepted fix (a robot that never saw a camera and serial bench commands are not
+watched; telemetry field `cam` = ms since the last accepted fix, -1 = never); the camera order check is bounded (10
+fixes in a row with a time stamp not after the last one = camera clock stepped back: re-base and accept); motor guard
+(`MOTOR_GUARD_MS` 50 ms, checked every 10 ms by an `esp_timer` callback outside the control task, real and bench
+builds): control task silent = both motor outputs forced to zero until it ticks again, `i` shows `guard trips`; MQTT down or the
 comms heartbeat stale for more than 0.3 s forces both motors to zero (bench commands exempt); raw PWM tests capped
 at 10 s and +-255; task watchdog (1 s, panic -> reset, driver inputs low) watches only the control task (the core-0
 idle task is removed because PubSubClient can block core 0 for the 2 s socket timeout).
@@ -150,13 +157,14 @@ dumping 2 Hz | idle / arrived short flash every 2 s.
 | No telemetry | `secrets.h` WiFi / broker IP, firewall on 1883; serial `[wifi]` / `[mqtt] failed, state N` |
 | Ignores commands | wrong topic or `id`; `i`: `rx cmd`, `badjson` |
 | Stops after a moment, state `idle` | no command repeats (300 ms watchdog) |
+| Stops 1 s after the camera node ended, `i` shows `(camera lost)` | camera watchdog: restart the camera node (the command resumes with the first fix) or reboot the robot for a run without camera |
 | `(link lost: motors off)` in `i` | MQTT down > 0.3 s; bench commands still work |
 | `overruns` rising, or `w` shows `LOW` | report it / raise that `*_TASK_STACK` |
 
 ## 7. Tests
 
 ```
-node test/host/js_mirror/mirror_test.js          # 47 checks of motion_core.h (JS mirror, float32 odometry)
+node test/host/js_mirror/mirror_test.js          # 68 checks of motion_core.h (JS mirror, float32 odometry)
 python ../../twin3d/link/py/check_numbers.py     # config.h vs twin_params: must print ALL MATCH
 g++ -std=c++17 -O2 -Wall -Wextra -Iinclude test/host/test_motion_core.cpp -o test_motion_core   # needs a host g++
 ```

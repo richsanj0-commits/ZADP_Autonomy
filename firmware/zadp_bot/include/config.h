@@ -121,7 +121,16 @@
 #define CAM_MAX_AGE_S     0.25f      // [twin] P.cam.maxAge: drop a fix older than this (odometry history is 0.32 s)
 #define CAM_MAX_JUMP_M    0.05f      // [fw] reject a fix this far from the estimate ...
 #define CAM_MAX_JUMP_DEG  20.0f      // [fw] ... or this far off in heading
-#define CAM_RELOCK_COUNT  10         // [fw] ... unless this many fixes in a row disagree: then jump to the camera
+#define CAM_RELOCK_COUNT  10         // [fw] ... unless this many fixes in a row disagree: then jump to the camera.
+                                     // Also: this many fixes in a row with a time stamp not after the last accepted
+                                     // one = the camera clock stepped back: re-base the order check and go on
+// Camera watchdog [fw] (copied in fake_bot.py, checked by check_numbers.py). Once a fix was accepted, a drive / turn
+// stops when no fix was accepted for this long, and resumes with the next accepted fix. Why 1 s: the camera sends
+// 30 fixes per second (P.cam.rateHz), so 1 s is 30 lost in a row: a dead camera node, not WiFi jitter, and 3 times
+// the relock time (CAM_RELOCK_COUNT fixes = 0.33 s), so a relock never trips it. Until the stop the robot drives at
+// most CRUISE_SPEED * 1 s = 0.2 m on encoders alone.
+#define CAM_STALE_S       1.0f
+#define CAM_AGE_REPORT_MAX_MS 99999  // [fw] cap of the telemetry field `cam` (ms since the last accepted fix): 5 digits
 
 // ---------------------------------------------------------------- wheel speed loop [fw]
 #define CONTROL_HZ       200         // control loop rate (FreeRTOS tick is 1 ms on arduino-esp32)
@@ -174,7 +183,7 @@
 #define TEL_TASK_PRIO       6        // above comms so the 20 Hz rate holds while comms parses
 #define TEL_TASK_STACK      4096     // snprintf with %f
 #define TEL_MUTEX_WAIT_MS   10       // max wait for the MQTT client lock; on timeout this telemetry slot is skipped
-#define TEL_BUF_SIZE        200      // bytes, one telemetry JSON (about 120 used)
+#define TEL_BUF_SIZE        200      // bytes, one telemetry JSON (about 125 used; longest possible 140)
 #define STATUS_BUF_SIZE     200      // bytes, the retained status JSON (about 130 used)
 #define CONSOLE_TASK_CORE   1        // serial bench self-test
 #define CONSOLE_TASK_PRIO   2
@@ -190,6 +199,12 @@
 #define TWDT_TIMEOUT_MS     1000     // task watchdog: control task must run at least this often or the chip resets.
                                      // Only the control task is watched (the core-0 idle task is removed: PubSubClient
                                      // busy-waits up to MQTT_SOCKET_TIMEOUT_S on core 0 and must not reset the chip)
+// Motor guard: an esp_timer callback (esp_timer task, core 0; NOT the control task) forces both motor outputs to zero
+// when the control task has not ticked for MOTOR_GUARD_MS, and keeps forcing zero every MOTOR_GUARD_PERIOD_MS until
+// it ticks again. It covers the time before the task watchdog resets the chip. 50 ms = 10 missed control ticks
+// (the control task normally runs every 5 ms and takes well under 1 ms); worst case cut after 50 + 10 ms.
+#define MOTOR_GUARD_MS        50     // control task silent this long = motors forced to zero
+#define MOTOR_GUARD_PERIOD_MS 10     // guard timer period
 #define LINK_LOSS_STOP_S    WATCHDOG_S  // [twin] P.link.watchdog: MQTT down (or comms task stuck) this long = motors off
                                         // (bench exempt)
 #define BOOT_STACK_REPORT_MS 3000    // print the stack high-water marks once this long after boot (console task)

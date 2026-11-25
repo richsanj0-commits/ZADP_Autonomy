@@ -161,4 +161,16 @@ P.link.readyTimeout = 15;         % s, run_real waits this long for telemetry + 
 P.link.parkTol     = 0.03;        % m, run_real: a robot must stand this close to its parking slot ...
 P.link.parkTolDeg  = 15;          % deg, ... and heading
 P.link.camStartTimeout = 20;      % s, run_real: the camera node must see all corner markers within this time
+% Linked run (brain_run_linked, run_real): defaults and the limits that END a run (stop to every robot, then error)
+P.link.holdTimeout = 20;          % s, syncToReal: the twin waits this long for "arrived" before it is released (counted)
+P.link.logDt       = 0.1;         % s, twin-vs-real log period (and onStep period)
+P.link.camStale    = 0.2;         % s, a camera pose older than this is not compared (logged as NaN, counted in lk.camStale)
+P.link.telStale    = 2;           % s, no telemetry from a robot this long ends the run (link:silent)
+P.link.camLossTime = 1.0;         % s, no camera pose of a robot this long ends the run (link:camLost). Above camStale and
+                                  %    above the longest brain stall (0.6 s), so a hidden frame or a stall never trips it
+P.link.divergeLimit = 0.10;       % m, twin-vs-real position error (fresh camera poses only) above this ...
+P.link.divergeTime = 1.0;         % s, ... for this long ends the run (link:diverged). Healthy runs stay below 0.030 m (dry
+                                  %    test limit) and 0.032 m (bench, worst measured): 0.10 m is 3 times that, and the 1 s
+                                  %    filter drops single bad camera fixes
+P.link.camCheckDt  = 1.0;         % s, run_real looks at the camera helper (process alive, no error in its log) this often
 end

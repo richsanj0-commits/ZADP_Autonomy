@@ -9,6 +9,8 @@
 %      robot's watchdog (P.link.watchdog) stops it; heartbeats again -> it resumes and arrives
 %   f. keep-alive across a brain stall: MATLAB sends NOTHING for 0.7 s (longer than the 300 ms watchdog, shorter
 %      than hostTimeout) during a drive; the bridge's repeats keep the robot moving (never idle)
+%   g. a robot 0.30 m from its twin: the linked run ends with error link:diverged naming the robot
+%   h. the camera node killed during a linked run: the run ends with error link:camLost (SKIP without numpy)
 %   e. every process started is gone afterwards (checked by PID)
 %   If Python is missing the test prints SKIP and passes.
 here = fileparts(mfilename('fullpath'));
@@ -77,7 +79,7 @@ for i = 1:numel(lines)
         assert(ismember(m.payload.action, {'goto', 'turn', 'dump', 'stop'}) && m.payload.seq >= 1, 'b: cmd values');
         seen.cmd = seen.cmd + 1;
     elseif endsWith(m.topic, '/telemetry')
-        want = {'id', 'seq', 'encL', 'encR', 'x', 'y', 'heading', 'state'};
+        want = {'id', 'seq', 'encL', 'encR', 'x', 'y', 'heading', 'state', 'cam'};
         assert(isequal(sort(fieldnames(m.payload)'), sort(want)), 'b: telemetry fields %s', strjoin(fieldnames(m.payload), ','));
         assert(strcmp(m.topic, sprintf('zadp/bot%d/telemetry', m.payload.id)), 'b: telemetry topic');
         assert(ismember(m.payload.state, {'idle', 'moving', 'turning', 'dumping', 'arrived'}), 'b: state %s', m.payload.state);
@@ -163,14 +165,69 @@ for sync = [false true]
     end
 end
 
+link_close(L, true); delete(guard3); clear L
+left3 = link_kill(procs3); assert(isempty(left3), 'c: processes left: %s', mat2str(left3));
+
+% ---- g. divergence: robot 3 starts 0.30 m beside its parking slot (its twin starts on the slot). To come within
+%      P.link.divergeLimit it would have to turn and drive 0.20 m, which takes longer than P.link.divergeTime
+init = brain_layout(plan, P).slot;
+init(3, 2) = init(3, 2) + 0.30;
+procs4 = link_launch(P, struct('mode', 'loopback', 'init', init));
+cleaner4 = onCleanup(@() link_kill(procs4));
+L = link_open(P, struct('port', procs4.port));
+guard4 = onCleanup(@() link_close(L, false));
+try
+    brain_run_linked(plan, P, struct('link', L, 'maxTime', 10));
+    error('test:noError', 'g: the run went on with robot 3 0.30 m from its twin');
+catch err
+    assert(strcmp(err.identifier, 'link:diverged') && contains(err.message, 'robot 3'), 'g: wrong error: %s (%s)', ...
+        err.message, err.identifier);
+    fprintf('  g. robot 3 0.30 m off its twin -> %s: %s\n', err.identifier, err.message);
+end
+link_close(L, true); delete(guard4); clear L
+left4 = link_kill(procs4); assert(isempty(left4), 'g: processes left: %s', mat2str(left4));
+
+% ---- h. camera loss: robots without their own camera pose, seen by the simulated camera node (as run_real('dry'));
+%      the camera node (started by this test) is killed 3 s into the run
+pids5 = [];
+if system(sprintf('"%s" -c "import numpy"', exe)) == 0
+    procs5 = link_launch(P, struct('mode', 'loopback', 'fakeCam', false, 'camNode', 'sim'));
+    cleaner5 = onCleanup(@() link_kill(procs5));
+    pids5 = procs5.pids;
+    L = link_open(P, struct('port', procs5.port));
+    guard5 = onCleanup(@() link_close(L, false));
+    % the camera node is the last process link_launch started; its log names its own PID too
+    camPids = unique([double(procs5.objs{end}.Id), str2double(regexp(fileread(procs5.logs.cam), 'pid=(\d+)', 'tokens', 'once'))]);
+    killed = containers.Map();
+    try
+        brain_run_linked(plan, P, struct('link', L, 'maxTime', 15, 'onStep', @(W, ~, ~) killAt(W, camPids, 3, killed)));
+        error('test:noError', 'h: the run went on without a camera');
+    catch err
+        assert(strcmp(err.identifier, 'link:camLost'), 'h: wrong error: %s (%s)', err.message, err.identifier);
+        fprintf('  h. camera node killed at 3 s -> %s: %s\n', err.identifier, err.message);
+    end
+    link_close(L, true); delete(guard5); clear L
+    left5 = link_kill(procs5); assert(isempty(left5), 'h: processes left: %s', mat2str(left5));
+else
+    fprintf('  h. SKIP camera loss: numpy not installed (the simulated camera node needs it)\n');
+end
+
 % ---- e. no process left (by PID)
-link_close(L, true); delete(guard3);
-allPids = unique([procs.pids, procs2.pids, procs3.pids]);
+allPids = unique([procs.pids, procs2.pids, procs3.pids, procs4.pids, pids5]);
 link_kill(procs); link_kill(procs3);
 left = link_kill(struct('pids', allPids));
 assert(isempty(left), 'e: processes still running: %s', mat2str(left));
 fprintf('  e. all %d started processes are gone (PIDs %s)\n', numel(allPids), mat2str(allPids));
 fprintf('test_link PASSED (mode %s)\n', procs.mode);
+
+function killAt(W, pids, t, killed)
+% kills the given processes (started by this test) once, when the twin time reaches t
+if W.t < t || isKey(killed, 'done'), return; end
+killed('done') = true;
+for p = pids(~isnan(pids))
+    system(sprintf('taskkill /PID %d /T /F >nul 2>&1', p));
+end
+end
 
 function last = pickLast(R, id, last)
 for q = 1:numel(R.telemetry)

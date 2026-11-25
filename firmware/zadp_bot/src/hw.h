@@ -12,6 +12,12 @@ namespace hw {
 void motorsBegin();
 void motorOut(bool left, int pwm);     // signed PWM, + = wheel forward, clamped to +-PWM_MAX
 void motorsOff();
+// Motor guard (independent cut, config.h MOTOR_GUARD_MS). motorGuardBegin() once in setup() after motorsBegin();
+// motorGuardKick() by the control task every tick. The guard runs in the esp_timer task, never in the control task.
+void motorGuardBegin();
+void motorGuardKick();
+uint32_t motorGuardTrips();            // how many times the guard cut the motors since boot
+bool motorGuardCut();                  // true while the guard holds the motors at zero
 
 // Encoders: cumulative 32-bit counts, forward positive (ENC_x_DIR applied).
 // encodersRead() is called only by the control task after setup() (the PCNT unwrap state is not shared).

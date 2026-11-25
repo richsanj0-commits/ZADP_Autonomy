@@ -6,7 +6,7 @@ Date: 2026-11-22. Numbers below were measured in the runs named; nothing is esti
 
 ## 1. Test status
 
-Full `run_all_tests` (10 tests, 493 s): 9 passed, `test_link` failed once (36 mm twin-vs-real against its 30 mm limit, while another job loaded the PC). Re-run alone three times on an idle PC: 3 of 3 passed.
+The suite has 11 `test_*.m` files. Full `run_all_tests` (recorded as 10 tests, 493 s): 9 passed, `test_link` failed once (36 mm twin-vs-real against its 30 mm limit, while another job loaded the PC). Re-run alone three times on an idle PC: 3 of 3 passed.
 
 | Test | Result |
 |---|---|

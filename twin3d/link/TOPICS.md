@@ -12,7 +12,7 @@ heading counter-clockwise from +x, wrapped to (-pi, pi]. The apron is y in [-0.2
 | Topic | Direction | Rate | QoS | Payload |
 |---|---|---|---|---|
 | `zadp/botN/cmd` | brain -> robot | new command + bridge repeats at `P.link.repeatHz` (10 Hz) | 1 new seq, 0 repeats | `{id, truck, seq, action, x, y, heading, speed[, dir, tol]}` |
-| `zadp/botN/telemetry` | robot -> brain | `P.link.telemetryHz` (20 Hz) + at once on a new seq | 0, not retained | `{id, seq, encL, encR, x, y, heading, state}` |
+| `zadp/botN/telemetry` | robot -> brain | `P.link.telemetryHz` (20 Hz) + at once on a new seq | 0, not retained | `{id, seq, encL, encR, x, y, heading, state, cam}` |
 | `zadp/cam/pose` | camera -> all | `P.cam.rateHz` (30 Hz) per visible robot | 0 | `{bot, x, y, heading, t, age}` |
 | `zadp/botN/status` | robot -> anyone | once per MQTT connect | 0, **retained** | `{id, fw, reset, gyro, ip, rssi}` |
 
@@ -67,15 +67,20 @@ Actions (robot side = `motion_core.h` = `fake_bot.py` = the twin's `bot_controll
   the laws never ask more than 0.23 m/s). Effective track = `P.bot.track * P.bot.trackScale` (= `TRACK_M*TRACK_SCALE`).
 
 ## telemetry
-`{"id":1,"seq":1795023945,"encL":12034,"encR":12110,"x":0.52,"y":0.40,"heading":0.31,"state":"moving"}`
+`{"id":1,"seq":1795023945,"encL":12034,"encR":12110,"x":0.52,"y":0.40,"heading":0.31,"state":"moving","cam":33}`
 
 `seq` = the robot's current seq (0 before the first command). `encL`, `encR` = cumulative 4x quadrature counts since
 power-on (reset on reboot; about `P.bot.encoderCPR` = 2772.2 per wheel revolution, per-wheel calibrated in the
-firmware). `x, y, heading` = the robot's own fused estimate (heading wrapped). `state`:
+firmware). `x, y, heading` = the robot's own fused estimate (heading wrapped). `cam` (last field, added 2026-11-25;
+readers of the first 8 fields are not affected) = ms since the robot last ACCEPTED a camera fix, capped at 99999;
+`-1` = no fix accepted yet (robot without camera). Camera watchdog (firmware `CAM_STALE_S` = 1 s, `fake_bot.py` the
+same): once a fix was accepted, `cam` above 1000 while driving (goto drive phase) or turning = wheel command 0, state
+`idle`, goal kept, exactly like the command watchdog; only a new accepted fix resumes the command (a new command does
+not). A robot with `cam` -1 is never stopped by it; a dump and braking carry on. `state`:
 
 | `state` | when |
 |---|---|
-| `idle` | no command yet; after an unknown action; a `stop` while the wheels run down; a watchdog stop |
+| `idle` | no command yet; after an unknown action; a `stop` while the wheels run down; a watchdog stop (no cmd for 0.3 s, or no camera fix for 1 s: `cam` > 1000) |
 | `moving` | executing a `goto` (driving or braking) |
 | `turning` | executing a `turn` |
 | `dumping` | executing a `dump` |
@@ -83,7 +88,21 @@ firmware). `x, y, heading` = the robot's own fused estimate (heading wrapped). `
 | `offline` | MQTT last will only (`{"id":N,"state":"offline"}`, no other fields) |
 
 The brain waits for `state == "arrived"` AND `seq ==` its seq. `brain_run_linked` ends the run (stop to everyone) on
-`offline` or when a robot's telemetry stops for 2 s.
+`offline` or when a robot's telemetry stops for 2 s (`P.link.telStale`).
+
+### Run end / abort (`brain_run_linked`, `run_real`)
+Every early end is an error: stop is sent to every robot first, then no command at all, so the 0.3 s command watchdog
+holds the robots stopped. `run_real` prints `ended early, all robots stopped: <id>: <message>` and kills its helpers.
+
+| Error id | Ends the run when | Number (`P.link`) |
+|---|---|---|
+| `link:offline` | a robot's MQTT last will arrived | |
+| `link:silent` | no telemetry from a robot | `telStale` 2 s |
+| `link:camLost` | no camera pose of a robot (camera node dead, marker hidden, out of view) | `camLossTime` 1.0 s |
+| `link:diverged` | a robot's twin-vs-real position error stays above the limit; fresh camera poses only (not older than `camStale` 0.2 s), one pose inside the limit clears the timer | `divergeLimit` 0.10 m for `divergeTime` 1.0 s |
+| `link:aborted` | the view was closed, or (`run_real`, every mode) the camera helper process exited or logged an error (`aruco_node: ERROR`, bench: `ERROR`, any `Traceback`) | checked every `camCheckDt` 1.0 s |
+
+Healthy runs stay below 0.030 m (dry test limit) and 0.032 m (bench, worst measured), so 0.10 m never trips.
 
 ## cam/pose
 `{"bot":2,"x":1.10,"y":0.75,"heading":-0.80,"t":1795023945.561,"age":0.042}`
