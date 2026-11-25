@@ -38,7 +38,7 @@ for i = 1:nb
     pose = W.L.slot(i,:);
     b.s = bot_init(P, pose, i, W.rs);
     b.mode = 'parked'; b.slot = i; b.steps = []; b.k = 0; b.job = ''; b.spot = 0; b.R = [];
-    b.timer = 0; b.nextCam = 0; b.trips = 0; b.waitNeed = false(1, W.L.nSec); b.waitBot = 0; b.waitSince = NaN;
+    b.timer = 0; b.nextCam = 0; b.trips = 0; b.waitNeed = false(1, W.L.nSec); b.waitBot = 0;
     b.brake = false; b.rot = false; b.cmd = [0 0]; b.inSite = false; b.truck = 0; b.payload = 0; b.load = 0;
     W.bots(i) = b; %#ok<AGROW>
     W.slotRes(i) = i;

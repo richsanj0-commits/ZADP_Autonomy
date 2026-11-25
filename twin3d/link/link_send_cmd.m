@@ -29,6 +29,5 @@ msg = struct('topic', sprintf(L.P.mqtt.topicCmd, cmd.id), 'payload', pl);
 write(L.tcp, uint8([jsonencode(msg) 10]));
 cmd.tSent = toc(L.t0);
 L.st('hb') = cmd.tSent;                           % any line counts as a heartbeat for the bridge
-L.st('nSent') = L.st('nSent') + 1;
 last = L.st('last'); last{cmd.id} = cmd; L.st('last') = last;
 end

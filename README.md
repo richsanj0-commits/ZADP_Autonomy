@@ -31,11 +31,6 @@ Round 1 also offers 5 sample sketches with known dimensions.
 - `twin3d/` — MATLAB digital twin with 3 robots (start in `twin3d/HANDOVER.md`)
 - `firmware/zadp_bot` — ESP32 FreeRTOS robot firmware (`firmware/README.md`)
 
-## Files
-
-- `zadp_game.html` — the whole app
-- `test_sketches/` — test sketches
-- `tools/pipeline_test.js` — runs a sketch through all rounds in the browser console
 - `docs/test_results.md` — earlier results on 18 shapes (superseded by `docs/ZADP_Project_Documentation.md`)
 - `docs/prototype/zadp_sim.py`, `docs/prototype/zadp_run.gif` — first Python prototype; run it from `docs/prototype/` (`python zadp_sim.py --gif` writes `zadp_run.gif` into the current folder)
 

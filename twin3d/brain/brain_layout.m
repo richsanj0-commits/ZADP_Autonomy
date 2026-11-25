@@ -22,7 +22,6 @@ L.xSpL = min(sp(:,1)); L.xSpR = max(sp(:,1));
 L.xIn = mean(plan.spine.inLine(:,1)); L.xOut = mean(plan.spine.outLine(:,1));
 L.xMid = (L.xSpL + L.xSpR)/2;
 L.yEntry = plan.entry.pt(2);
-L.ySpineTop = max(sp(:,2));
 L.yLaneRoad = L.yEntry + 0.05;                                % cross line the lane-spot trips start from
 L.boundary = plan.boundary;
 L.apron = P.arena.apron; L.arenaW = P.arena.w;

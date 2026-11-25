@@ -40,6 +40,6 @@
 
 ## Open items
 - The L-paddock connector-road fix for the web app is parked in a git stash (`stash@{0}`, "L-paddock connector fix (untested)"). Untested.
-- Twin, firmware (`firmware/zadp_bot`, FreeRTOS tasks) and the hardware guide (`docs/ZADP_Hardware_Twin_Guide.pdf`) are committed. Web app fixes are a separate commit.
+- Twin, firmware (`firmware/zadp_bot`, FreeRTOS tasks) and the hardware guide (`docs/ZADP_Hardware_Twin_Guide.pdf`) are committed.
 - Web app open findings (disc collision model, route grid ignores truck length): `twin3d/FINAL_REPORT.md` section 6.
-- Firmware (2026-11-23): all 5 envs build. Robot 1 is flashed and verified on the floor over WiFi/MQTT through `mini_broker.py` (straight 0.2 m: +5161/+5171 counts, arrived; 90 degree turns left/right: gyro heading +87.4/-87.4 deg, arrived in 1.5 s; telemetry 19.3 Hz). Not yet verified: robots 2 and 3, a real camera and `aruco_node` (OpenCV not installed), `run_real('real')` end to end. First hardware steps: `twin3d/HANDOVER.md` section 14.
+- Firmware: 13 envs in `platformio.ini`; built: `bot1`, `bot2_b`, `bot2_bench`, `bot3_bench`. Robot 1 is flashed and verified on the floor over WiFi/MQTT through `mini_broker.py` (straight 0.2 m: +5161/+5171 counts, arrived; 90 degree turns left/right: gyro heading +87.4/-87.4 deg, arrived in 1.5 s; telemetry 19.3 Hz). Not yet verified: robots 2 and 3, a real camera and `aruco_node` (OpenCV not installed), `run_real('real')` end to end. First hardware steps: `twin3d/HANDOVER.md` section 14.

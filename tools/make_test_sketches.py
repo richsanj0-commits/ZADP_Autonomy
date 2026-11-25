@@ -11,7 +11,6 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Arc
 
 OUT = Path(__file__).resolve().parent.parent / "test_sketches"
 OUT.mkdir(exist_ok=True)

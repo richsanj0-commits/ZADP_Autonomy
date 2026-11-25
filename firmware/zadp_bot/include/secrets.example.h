@@ -4,7 +4,7 @@
 
 #define WIFI_SSID "your-network-name"
 #define WIFI_PASS "your-network-password"
-#define MQTT_HOST "192.168.1.10"     // IP of the PC running the Mosquitto broker (= P.mqtt.broker in twin_params.m)
+#define MQTT_HOST "192.168.1.10"     // IP of the PC running the broker (run_real starts mini_broker.py when none runs; = P.mqtt.broker in twin_params.m)
 
 // Optional, only if the broker requires a login:
 // #define MQTT_USER "zadp"

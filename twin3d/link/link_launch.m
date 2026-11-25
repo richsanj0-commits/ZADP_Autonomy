@@ -54,7 +54,10 @@ if ~isempty(both)
 end
 assert(isempty(intersect(opts.bots, opts.simBots)), 'link:bots', 'opts.bots and opts.simBots overlap');
 pyDir = fullfile(fileparts(mfilename('fullpath')), 'py');
-tag = sprintf('%d_%d', opts.port, randi(1e6));
+% rule: the log tag must be new on every launch. It does not come from randi: a test that resets the random
+% generator would get the tag of an earlier launch, and run_real would read that run's old log ("homography ready")
+uid = strrep(char(java.util.UUID.randomUUID), '-', '');
+tag = sprintf('%d_%s', opts.port, uid(1:12));
 if isempty(opts.config), opts.config = fullfile(tempdir, ['zadp_link_config_' tag '.json']); end
 link_write_config(P, opts.config);
 procs = struct('port', opts.port, 'mode', '', 'broker', '', 'pids', [], 'objs', {{}}, 'logs', struct(), ...
@@ -115,7 +118,6 @@ try
         for i = opts.camBots(:)'
             args = [args sprintf(' --slot %d=%.5f,%.5f,%.5f', i, opts.init(i,:))]; %#ok<AGROW>
         end
-        if ~isempty(opts.camArgs), args = [args ' ' opts.camArgs]; end   % e.g. --allow-unflagged
         if ~isempty(opts.camArgs), args = [args ' ' opts.camArgs]; end   % e.g. --allow-unflagged
         procs = startOne(procs, exe, args, procs.logs.cam, 'pid=', 'bench_cam.py');
     elseif ~isempty(opts.camNode)

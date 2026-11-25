@@ -38,11 +38,8 @@
     --danger-text: #ff867e;
 
     /* Spacing, radii & motion */
-    --s-1: 4px;
     --s-2: 8px;
     --s-3: 12px;
-    --s-4: 16px;
-    --s-5: 20px;
     --r-sm: 6px;
     --r-md: 8px;
     --r-lg: 10px;
@@ -1054,7 +1051,6 @@ let view = { minx: 0, miny: 0, maxx: 200, maxy: 140, s: 1, ox: 0, oy: 0 };
 const area = p => { let a = 0; for (let i = 0; i < p.length; i++) { const [x1, y1] = p[i], [x2, y2] = p[(i + 1) % p.length]; a += x1 * y2 - x2 * y1; } return a / 2; };
 const bounds = p => { const b = [Infinity, Infinity, -Infinity, -Infinity]; for (const [x, y] of p) { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); } return b; };
 const perim = p => p.reduce((s, a, i) => { const b = p[(i + 1) % p.length]; return s + Math.hypot(b[0] - a[0], b[1] - a[1]); }, 0);
-const edgeLen = (p, i) => { const a = p[i], b = p[(i + 1) % p.length]; return Math.hypot(b[0] - a[0], b[1] - a[1]); };
 const letter = i => i < 26 ? String.fromCharCode(65 + i) : "P" + (i + 1);
 const esc = v => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");   // user text (truck / area names) into innerHTML or a value="..." attribute
 const f = (v, d = 2) => (v == null || !isFinite(v)) ? "–" : (+v).toFixed(d);
@@ -1979,7 +1975,6 @@ function distToEdges([x, y], p) {
     d = Math.min(d, Math.hypot(a[0] + t * dx - x, a[1] + t * dy - y)); }
   return d;
 }
-const inAny = (pt, paths) => paths.some(p => pointInPoly(pt, p));
 
 function laneWidth() { return S.laneW > 0 ? +S.laneW : Math.max(0, ...S.fleet.map(t => +t.W || 0)) + 1; }
 
@@ -2400,7 +2395,6 @@ function newSim(method, cfg) {
   if (FIXED[method]) W.baseSpots = fixedSpots(W, ...FIXED[method]);
   return W;
 }
-const laneP = (W, d) => { const F = W.F, dd = Math.max(0, Math.min(d, W.lane.depthMax)); return [F.E[0] + F.n[0] * dd, F.E[1] + F.n[1] * dd]; };
 const latOf = (W, c) => (c[0] - W.F.E[0]) * W.F.t[0] + (c[1] - W.F.E[1]) * W.F.t[1];
 const gapOf = (W, a, b) => (a.gap + b.gap) / 2;
 
@@ -2522,7 +2516,6 @@ function bfs(G, starts, ok, okMove = () => true) {
   return d;
 }
 // follow decreasing distance from a cell back to the start set -> list of points
-function trace(G, dist, k) { return traceWith(G, dist, dist === G.distIn ? G.mvIn : G.mvOut, k); }
 function traceWith(G, dist, mv, k) { const out = [cellXY(G, k)]; let cur = k, guard = 0;
   while (dist[cur] > 0 && guard++ < 1e5) { const i = cur % G.nx, j = (cur / G.nx) | 0; let best = cur;
     for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= G.nx || jj >= G.ny) continue;

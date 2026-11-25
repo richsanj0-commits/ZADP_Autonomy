@@ -1,4 +1,4 @@
-% TEST_MAPS  The same brain code and parameters on six more site shapes, plus the reference arena.
+% TEST_MAPS  The same brain code and parameters on seven more site shapes, plus the reference arena (8 maps).
 %   Part 1, the four arena shapes in plan\ (arena = square with a cut corner, rect = wide rectangle,
 %   lshape = L with an arm up the left side, a NON-CONVEX site, hex = irregular hexagon): a shortened fill
 %   (opts.maxTime = 400 s of sim time, seed 1) on each, asserting zero robot-robot overlaps, pile hits,

@@ -30,7 +30,7 @@ L.st('buf') = '';
 % grows by 10 per second, far faster than a session sends commands, so it never repeats a recent seq.
 L.st('seq') = repmat(mod(floor(posixtime(datetime('now'))*10), 2^30), 1, P.bot.count);
 L.st('mode') = '';
-L.st('nSent') = 0; L.st('nTel') = 0; L.st('nCam') = 0;
+L.st('nTel') = 0; L.st('nCam') = 0;
 L.st('last') = cell(1, P.bot.count);            % last command sent to each robot (the bridge repeats it)
 L.st('hb') = -Inf;                              % link-clock time of the last line sent (heartbeat, link_keepalive)
 subs = {strrep(P.mqtt.topicTelemetry, 'bot%d', '+'), P.mqtt.topicCamPose};

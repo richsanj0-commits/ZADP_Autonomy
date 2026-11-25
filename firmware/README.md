@@ -63,7 +63,7 @@ Build variants (`platformio.ini`; N = 1..3, all set `BOT_ID`):
 
 Built by the lead (2026-11-23/24): `bot1`, `bot2_b`, `bot2_bench`, `bot3_bench`. The other envs were not built in this check. On the floor: `bot1` (robot 1). On the bench: `bot2_bench`, `bot3_bench`.
 
-## 2. Robot 1 hardware (the micromouse build, same pins on every robot)
+## 2. Robot 1 hardware (the micromouse build; robots 2 and 3 use wiring B, env `botN_b`)
 
 * ESP32 DevKit (esp32dev), TB6612FNG, two encoder motors (34 mm wheels, track 75.3 mm, CPR 2772.1 / 2772.3).
 * Feed-forward measured on the micromouse (wheels in the air): `PWM = 15 + 432.6 x speed (m/s)` (`PWM_DEADBAND`,

@@ -86,12 +86,11 @@ P.truck.wheelColor   = [0.10 0.10 0.10];
 % ---- Pile ----------------------------------------------------------------
 P.pile.reposeDeg = 37;
 P.pile.color     = [0.55 0.42 0.28];
-% Pile maths, copied from the planner (zadp_game.html: MATERIALS lines 1069-1076, first entry "Waste rock /
-% overburden (blasted)" = the material of the exported plan; calc(t) lines 1085-1092):
+% Pile maths, copied from the planner (zadp_game.html: MATERIALS, first entry "Waste rock /
+% overburden (blasted)" = the material of the exported plan; calc(t)):
 %   V = payload / rho (t / (t/m^3) = m^3),  r = cbrt(3 V / (pi tan(repose))),  h = r tan(repose)
 % There is no shape factor. Used by brain/pile_from_payload.m, at SITE scale (arena = x P.scale.arenaPerSite).
-P.pile.material  = 'Waste rock / overburden (blasted)';
-P.pile.density   = 1.8;           % t/m^3, loose density rho (html line 1070)
+P.pile.density   = 1.8;           % t/m^3, loose density rho (html MATERIALS)
 % every new truck carries the nominal plan payload times a load factor drawn uniformly from [loadMin, loadMax]
 P.pile.loadMin   = 0.85;
 P.pile.loadMax   = 1.00;
@@ -104,7 +103,6 @@ P.ctrl.rotateExitDeg = 15;        % ... until it is below this one (hysteresis)
 P.ctrl.captureRadius = 0.03;      % m, inside this never rotate in place; heading correction fades to 0 at the target
 P.ctrl.decelFrac   = 0.5;         % approach braking decel as a fraction of maxAccel
 P.ctrl.arriveTol   = 0.005;       % m, on the ESTIMATED pose (true error = this + camera/odometry error, kept under 10 mm)
-P.ctrl.headingTolDeg = 3;
 
 % ---- Central brain (phase 4, see brain/README.md) -------------------------
 P.brain.dt         = 0.02;        % s, step of the 3-robot world (50 Hz; the phase 3 model is exact-arc, motor lag 0.08 s)
